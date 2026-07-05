@@ -62,4 +62,13 @@ Inside a session:
 | `scripts/run-eval-loop.ps1` | Runs evals on demand |
 | `scripts/spawn-agent.ps1` | Scaffolds + validates a new agent |
 
+## Local Coder (offline, credit-free)
+
+- **Alfred-Coder Tier**: Optional local tier running IBM Granite 4.1 8B via LM Studio's OpenAI-compatible API at `http://localhost:1234`, accessible through `scripts/local-coder.ps1`.
+- **Hybrid Routing**: Routine low-stakes coding tasks execute locally for free; complex or architectural work defaults to Kiro/Opus.
+- **Free Fine-Tuning**: Model can be fine-tuned without cost on Kaggle or Colab.
+- **Personalization**: Retrain and reload as a bespoke personal model.
+- **Offline Capability**: Fully functional without internet access, ideal for isolated environments.
+- **Ease of Use**: Simple script invocation ensures seamless integration into existing workflows.
+
 See `implementation-plan.md` for the full design and build sequence.

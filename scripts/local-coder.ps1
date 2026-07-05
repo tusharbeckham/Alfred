@@ -64,7 +64,10 @@ $body = @{
 } | ConvertTo-Json -Depth 6
 
 $t0 = Get-Date
-try { $resp = Invoke-RestMethod "$BaseUrl/chat/completions" -Method Post -Body $body -ContentType 'application/json' -TimeoutSec $TimeoutSec }
+try {
+    $bodyUtf8 = [System.Text.Encoding]::UTF8.GetBytes($body)   # PS 5.1: send UTF-8 bytes so non-ASCII (emoji/unicode) context doesn't 400
+    $resp = Invoke-RestMethod "$BaseUrl/chat/completions" -Method Post -Body $bodyUtf8 -ContentType 'application/json; charset=utf-8' -TimeoutSec $TimeoutSec
+}
 catch { Die ("Request failed: " + $_.Exception.Message) 1 }
 $secs = ((Get-Date) - $t0).TotalSeconds
 
