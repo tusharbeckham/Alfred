@@ -17,7 +17,7 @@
     },
     "subagent": {
       "availableAgents": ["alfred-*"],
-      "trustedAgents": ["alfred-manager", "alfred-leader", "alfred-reviewer", "alfred-researcher", "alfred-planner", "alfred-evaluator"]
+      "trustedAgents": ["alfred-manager", "alfred-leader", "alfred-reviewer", "alfred-researcher", "alfred-planner", "alfred-evaluator", "alfred-math", "alfred-physics"]
     }
   },
   "resources": [

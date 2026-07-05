@@ -55,6 +55,8 @@ optimization**, never model-weight training.
 - **alfred-security** — security review and hardening.
 - **alfred-docs** — documentation.
 - **alfred-data** — data analysis.
+- **alfred-math** — mathematics: proofs, numerical methods, scientific ML; generates verified fine-tune data.
+- **alfred-physics** — physics: mechanics/E&M/quantum/thermo, PINNs, simulation; generates verified fine-tune data.
 
 ### Tier 3 — Meta-Agents (agents that manage agents)
 - **alfred-evaluator** (opus 4.6+) — runs the training evals.

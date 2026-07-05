@@ -54,23 +54,23 @@ function New-Row {
 
 $rows = New-Object System.Collections.Generic.List[object]
 
-# ---- Source 1: curated examples ----------------------------------------------------
-if (Test-Path -LiteralPath $SourceFile) {
-    $raw = Get-Content -LiteralPath $SourceFile -Raw
+# ---- Source 1: curated examples (ALL data/finetune/*.md files) ---------------------
+$curatedFiles = @(Get-ChildItem -Path $OutDir -Filter '*.md' -File -ErrorAction SilentlyContinue)
+if ($curatedFiles.Count -eq 0) { Write-Host "[build] no curated *.md in $OutDir (skipping)" -ForegroundColor Yellow }
+foreach ($cf in $curatedFiles) {
+    $raw = Get-Content -LiteralPath $cf.FullName -Raw
     # Split into blocks on '### PROMPT' and parse each up to '### END'.
     $matches = [regex]::Matches(
         $raw,
         '(?ms)^\#\#\#\s*PROMPT\s*\r?\n(.*?)^\#\#\#\s*OUTPUT\s*\r?\n(.*?)^\#\#\#\s*END\s*$'
     )
+    $n = 0
     foreach ($m in $matches) {
         $p = $m.Groups[1].Value
         $o = $m.Groups[2].Value
-        if ($p.Trim() -and $o.Trim()) { $rows.Add((New-Row -UserContent $p -AssistantContent $o)) }
+        if ($p.Trim() -and $o.Trim()) { $rows.Add((New-Row -UserContent $p -AssistantContent $o)); $n++ }
     }
-    Write-Host ("[build] curated examples parsed: {0}" -f $matches.Count) -ForegroundColor Cyan
-}
-else {
-    Write-Host "[build] no curated file at $SourceFile (skipping)" -ForegroundColor Yellow
+    Write-Host ("[build] {0}: {1} pairs" -f $cf.Name, $n) -ForegroundColor Cyan
 }
 
 # ---- Source 2 (optional): weak pairs mined from memory/*.md ------------------------
