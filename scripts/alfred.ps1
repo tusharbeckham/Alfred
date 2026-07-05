@@ -1,18 +1,16 @@
 <#
 .SYNOPSIS
-  Alfred (OFFLINE) — call your local Alfred-Coder from any terminal. No Kiro, no credits.
+  Alfred (OFFLINE) — call your local Alfred-Coder from any terminal, plus a deterministic
+  git commit+push. No Kiro, no credits.
 
 .DESCRIPTION
-  Ensures LM Studio's server + model are running, then runs your task on the local model
-  (Granite 4.1 8B) via scripts/local-coder.ps1 — or opens an interactive local chat.
-  This is the "call Alfred offline" entry point. For full team orchestration, use Kiro.
+  - alfred "task"        -> run a coding task on the local model (Granite via LM Studio)
+  - alfred -Chat         -> interactive local chat
+  - alfred -Push "msg"   -> git add -A + commit + push in the CURRENT folder (NO model needed)
 
-.EXAMPLE
-  powershell -File scripts\alfred.ps1 "write a python function to reverse a string"
-.EXAMPLE
-  powershell -File scripts\alfred.ps1 -ContextFile .\app.py "add error handling"
-.EXAMPLE
-  powershell -File scripts\alfred.ps1 -Chat        # interactive local chat
+.EXAMPLE  powershell -File scripts\alfred.ps1 "write a python function to reverse a string"
+.EXAMPLE  powershell -File scripts\alfred.ps1 -Push "update readme"
+.EXAMPLE  powershell -File scripts\alfred.ps1 -Chat
 #>
 [CmdletBinding()]
 param(
@@ -20,10 +18,25 @@ param(
     [string]$Model = 'granite-4.1-8b',
     [string]$ContextFile,
     [switch]$Chat,
+    [switch]$Push,
     [switch]$ShowStats
 )
-
 $ErrorActionPreference = 'Stop'
+
+# -Push: deterministic git add + commit + push in the CURRENT directory (no model involved).
+if ($Push) {
+    $null = git rev-parse --is-inside-work-tree 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Host ("Not a git repository: " + (Get-Location).Path) -ForegroundColor Red; exit 1 }
+    $msg = if ($Task -and $Task.Count -gt 0) { $Task -join ' ' } else { 'update' }
+    git add -A
+    if (-not (git diff --cached --name-only)) { Write-Host "Nothing to commit." -ForegroundColor Yellow; exit 0 }
+    git commit -m $msg | Out-Null
+    git push
+    if ($LASTEXITCODE -eq 0) { Write-Host ("Pushed: " + $msg) -ForegroundColor Green }
+    else { Write-Host ("Push failed (exit " + $LASTEXITCODE + ")") -ForegroundColor Red }
+    exit $LASTEXITCODE
+}
+
 $lms = Join-Path $env:USERPROFILE '.lmstudio\bin\lms.exe'
 if (-not (Test-Path $lms)) {
     Write-Host "LM Studio CLI not found. Install LM Studio first (see docs\local-coder\LM-STUDIO-SETUP.md)." -ForegroundColor Red
@@ -50,7 +63,7 @@ if ($Chat) { & $lms chat $Model; exit $LASTEXITCODE }
 
 # 4) One-off task -> local-coder.ps1
 if (-not $Task -or $Task.Count -eq 0) {
-    Write-Host 'Usage:  alfred "your task"   |   alfred -Chat   |   alfred -ContextFile file "task"' -ForegroundColor Yellow
+    Write-Host 'Usage:  alfred "your task"   |   alfred -Chat   |   alfred -Push "msg"   |   alfred -ContextFile file "task"' -ForegroundColor Yellow
     exit 2
 }
 $prompt = ($Task -join ' ')
