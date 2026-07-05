@@ -24,11 +24,17 @@ optimization**, never model-weight training.
 4. **Leave a trail.** Log decisions and learnings to `memory/`.
 5. **Improve continuously.** Feed outcomes into the Training System.
 
-## Org Chart (19 agents, 4 tiers)
+## Org Chart (Alfred overseer + 19 core agents + local-coder)
+
+### Overseer — Alfred (above all tiers)
+- **alfred** (opus 4.8, ultrathink) — The supreme overseer, ABOVE the manager and leader. The Owner's
+  top-level AI: directs and audits the whole team, delegates production coordination to alfred-manager,
+  routes routine coding to the free local model, and degrades to offline coding when Kiro is unavailable.
+  Chain: **Owner ↔ Alfred → alfred-manager → alfred-leader → workers.**
 
 ### Tier 0 — Owner Interface
-- **alfred-manager** (opus 4.8) — Personal assistant + Production Manager. Talks to the
-  Owner, owns coordination and reporting, delegates to the leader.
+- **alfred-manager** (opus 4.8) — Personal assistant + Production Manager. Under Alfred; talks to the
+  Owner day-to-day, owns coordination and reporting, delegates to the leader.
 
 ### Tier 1 — Leadership
 - **alfred-leader** (opus 4.8) — Orchestrator. Builds and guides subagent DAG pipelines.
