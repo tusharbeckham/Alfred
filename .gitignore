@@ -27,3 +27,7 @@ data/finetune/val.jsonl
 Thumbs.db
 .DS_Store
 .vscode/
+
+# hardened secret ignores
+**/mail.json
+**/telegram.json
