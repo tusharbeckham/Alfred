@@ -1,0 +1,57 @@
+{
+  "mcpServers": { "alfred": { "command": "node", "args": ["C:\\Alfred\\mcp\\alfred-server.js"], "timeout": 30000 } },
+  "name": "alfred-leader",
+  "description": "Alfred's Orchestrator. Turns objectives into multi-agent DAG pipelines, runs workers in parallel, owns orchestration and retry loops, and integrates results. Ultrathink-class planning.",
+  "model": "claude-opus-4.8",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-leader/identity.txt",
+  "tools": ["read", "write", "shell", "grep", "glob", "code", "subagent", "knowledge", "todo_list"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge", "todo_list", "@alfred/read_memory", "@alfred/list_agents", "@alfred/query_eval_results"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["memory/**", ".kiro/brains/alfred-leader/memory/**", "training/**", "evals/results/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**", "**/*.key", "**/*.pem"]
+    },
+    "shell": {
+      "autoAllowReadonly": true,
+      "deniedCommands": [
+        "rm\\s+-rf",
+        "del\\s+/[sqf]",
+        "format\\s",
+        "reg\\s+(add|delete)",
+        "Remove-Item.*-Recurse",
+        "git\\s+push.*(origin\\s+)?(main|master)",
+        "git\\s+push\\s+--force",
+        "git\\s+reset\\s+--hard",
+        "git\\s+clean\\s+-",
+        "shutdown",
+        "Stop-Computer"
+      ]
+    },
+    "subagent": {
+      "availableAgents": ["alfred-*"],
+      "trustedAgents": ["alfred-reviewer", "alfred-researcher", "alfred-planner", "alfred-evaluator", "alfred-docs", "alfred-data", "alfred-security", "alfred-tester"]
+    }
+  },
+  "resources": [
+    "file:///C:/Alfred/.kiro/brains/alfred-leader/brain.md",
+    "file:///C:/Alfred/.kiro/brains/alfred-leader/memory/notes.md",
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "agentSpawn": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-spawn.ps1", "timeout_ms": 10000 }
+    ],
+    "stop": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-stop.ps1", "timeout_ms": 15000 }
+    ]
+  },
+  "keyboardShortcut": "ctrl+shift+l",
+  "welcomeMessage": "Orchestrator ready. Give me an objective and I will assemble the team."
+}

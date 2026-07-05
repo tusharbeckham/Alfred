@@ -1,0 +1,29 @@
+{
+  "name": "alfred-planner",
+  "description": "Alfred's planner. Breaks goals into ordered, testable tasks with dependencies for the leader to orchestrate.",
+  "model": "claude-sonnet-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-planner/identity.txt",
+  "tools": ["read", "grep", "glob", "code", "knowledge", "todo_list", "write"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge", "todo_list"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/memory/**", "C:/Alfred/.kiro/brains/alfred-planner/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "agentSpawn": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-spawn.ps1", "timeout_ms": 10000 }
+    ]
+  }
+}

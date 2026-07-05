@@ -1,0 +1,23 @@
+{
+  "name": "alfred-security",
+  "description": "Alfred's security engineer. Threat-models, reviews for vulnerabilities, and recommends hardening with severity-ranked findings. Read-only review.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-security/identity.txt",
+  "tools": ["read", "grep", "glob", "code", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "agentSpawn": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-spawn.ps1", "timeout_ms": 10000 }
+    ]
+  }
+}

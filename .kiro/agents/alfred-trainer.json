@@ -1,0 +1,38 @@
+{
+  "mcpServers": { "alfred": { "command": "node", "args": ["C:\\Alfred\\mcp\\alfred-server.js"], "timeout": 30000 } },
+  "name": "alfred-trainer",
+  "description": "Alfred's self-improvement lead. Owns the eval-driven training loop; orchestrates evaluator + prompt-engineer; guards against regressions.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-trainer/identity.txt",
+  "tools": ["read", "write", "shell", "grep", "glob", "subagent", "knowledge", "todo_list"],
+  "allowedTools": ["read", "grep", "glob", "knowledge", "todo_list", "@alfred/read_memory", "@alfred/query_eval_results"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/training/**", "C:/Alfred/memory/**", "C:/Alfred/evals/results/**", "C:/Alfred/.kiro/skills/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**", "C:/Alfred/.kiro/agents/**"]
+    },
+    "shell": {
+      "autoAllowReadonly": true,
+      "deniedCommands": ["rm\\s+-rf", "format\\s", "reg\\s+(add|delete)", "Remove-Item.*-Recurse", "git\\s+push.*(main|master)", "shutdown", "Stop-Computer"]
+    },
+    "subagent": {
+      "availableAgents": ["alfred-evaluator", "alfred-prompt-engineer"],
+      "trustedAgents": ["alfred-evaluator"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "stop": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-stop.ps1", "timeout_ms": 15000 }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+TASK PROMPT — REFACTOR (alfred-coder, guarded by alfred-reviewer)
+Prepend prompts/base/common.txt.
+
+Goal: improve internal quality with ZERO behavior change.
+
+Procedure:
+1. BASELINE — ensure tests pass now. If coverage is thin around the target, add
+   characterization tests first so behavior is pinned.
+2. REFACTOR in small, reversible steps: rename for clarity, extract functions, remove
+   duplication, simplify control flow. One concern per step.
+3. VERIFY after each step — tests stay green. If a step breaks them, revert it.
+4. DIFF REVIEW — hand the diff to review; confirm no public API or behavior changed
+   unless the Owner asked.
+
+Report: what improved, proof behavior is unchanged (tests before/after), and the diff
+summary. Do not mix feature changes into a refactor.

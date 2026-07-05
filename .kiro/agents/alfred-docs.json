@@ -1,0 +1,29 @@
+{
+  "name": "alfred-docs",
+  "description": "Alfred's technical writer. Produces accurate, verified documentation matching project conventions.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-docs/identity.txt",
+  "tools": ["read", "write", "grep", "glob", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**", "**/*.key", "**/*.pem", "C:/Alfred/.kiro/agents/**"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "stop": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-stop.ps1", "timeout_ms": 15000 }
+    ]
+  }
+}

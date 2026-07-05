@@ -1,0 +1,12 @@
+TASK PROMPT — SELF-CRITIQUE (any agent, before final report)
+Prepend prompts/base/common.txt.
+
+Before declaring a task done, critique your own work as a skeptical reviewer would:
+1. Did I actually verify the result, or am I assuming? What proof do I have?
+2. What is the weakest part of this solution? What did I not test?
+3. What edge cases or failure modes remain?
+4. Did I stay within safety gates and the Owner's intent?
+5. Is there a simpler or more correct approach I dismissed too quickly?
+
+If the critique surfaces a real gap, fix it before reporting. Record any lasting lesson in
+memory/learnings.md.

@@ -1,0 +1,29 @@
+{
+  "name": "alfred-memory-curator",
+  "description": "Alfred's librarian. Maintains memory files and knowledge bases: consolidates, indexes, promotes learnings, preserves the audit trail.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-memory-curator/identity.txt",
+  "tools": ["read", "write", "grep", "glob", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/memory/**", "C:/Alfred/.kiro/brains/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**", "C:/Alfred/.kiro/agents/**"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "stop": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-stop.ps1", "timeout_ms": 15000 }
+    ]
+  }
+}

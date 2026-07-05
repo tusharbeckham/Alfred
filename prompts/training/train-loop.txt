@@ -1,0 +1,20 @@
+TASK PROMPT — TRAINING LOOP (alfred-trainer, orchestrates evaluator + prompt-engineer)
+Prepend prompts/base/common.txt.
+
+Run one iteration of the eval-driven self-improvement loop. This is NOT model training —
+it optimizes prompts and skills. No Kaggle, no weights.
+
+Loop:
+1. EVALUATE — have alfred-evaluator run the eval dataset(s) in evals/ against the current
+   prompts, scoring each case with its rubric. Record raw scores in evals/results/.
+2. SCORE — compute the aggregate and per-category pass rate. Compare to the last baseline
+   in training/history.md.
+3. DIAGNOSE — identify the lowest-scoring capability and the specific failing cases.
+4. OPTIMIZE — hand the target prompt + failures to alfred-prompt-engineer (see
+   prompts/self-improvement/prompt-optimizer.txt) for a new version.
+5. REGRESSION-TEST — re-run the FULL eval set on the candidate. Accept only if the target
+   category improves AND no other category regresses. Otherwise revert.
+6. ACCUMULATE — on acceptance, promote durable lessons into a skill or memory/learnings.md,
+   and append the delta to training/history.md.
+
+Output: baseline vs candidate scores, accept/reject decision, and the logged delta.

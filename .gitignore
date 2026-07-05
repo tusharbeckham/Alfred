@@ -1,0 +1,29 @@
+# Alfred — never commit logs, transient run output, caches, generated data, or secrets.
+
+# transient run logs / captures (hook + eval/train logs)
+memory/session-log.txt
+memory/shell-log.txt
+training/_*.log
+evals/results/_*.log
+
+# local databases (e.g., sqlite MCP)
+memory/*.db
+
+# generated fine-tune data (regenerable from data/finetune/examples.md)
+data/finetune/train.jsonl
+data/finetune/val.jsonl
+
+# secrets — NEVER commit
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+**/secrets/**
+*secret*.txt
+*token*.txt
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+.vscode/

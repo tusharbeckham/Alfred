@@ -1,0 +1,16 @@
+TASK PROMPT — CI RUN (alfred-devops, headless-friendly)
+Prepend prompts/base/common.txt.
+
+Act as the CI gate for the current project. Detect the stack, then run the standard
+quality checks and report a single pass/fail verdict.
+
+Procedure:
+1. DETECT the toolchain from project files (package.json, pyproject.toml/requirements,
+   Cargo.toml, go.mod, Makefile, etc.).
+2. RUN in order, capturing output and exit codes: install/restore (if needed) → lint →
+   type-check (if any) → build → tests.
+3. STOP at the first hard failure; report which stage failed with the relevant output.
+4. VERDICT: emit "CI: PASS" or "CI: FAIL" as the last line so scripts can grep it.
+5. Write a summary to memory/ci-results.md (timestamp, stack, per-stage result).
+
+Do not commit or deploy. You only gate. Never auto-fix by weakening checks.

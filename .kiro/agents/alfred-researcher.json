@@ -1,0 +1,28 @@
+{
+  "name": "alfred-researcher",
+  "description": "Alfred's researcher. Gathers and synthesizes information from the codebase and web with sources and confidence. Read-only.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-researcher/identity.txt",
+  "tools": ["read", "grep", "glob", "web_search", "web_fetch", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "web_search", "web_fetch", "knowledge"],
+  "toolsSettings": {
+    "web_fetch": {
+      "blocked": [".*pastebin\\.com.*"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "agentSpawn": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-spawn.ps1", "timeout_ms": 10000 }
+    ]
+  }
+}

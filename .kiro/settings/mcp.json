@@ -1,0 +1,52 @@
+{
+  "mcpServers": {
+    "alfred": {
+      "command": "node",
+      "args": ["C:\\Alfred\\mcp\\alfred-server.js"],
+      "timeout": 30000
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Alfred"],
+      "timeout": 120000,
+      "disabled": true
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "timeout": 120000,
+      "disabled": true
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "C:\\Alfred"],
+      "timeout": 120000,
+      "disabled": false
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "$GITHUB_TOKEN" },
+      "timeout": 120000,
+      "disabled": true
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "timeout": 120000,
+      "disabled": false
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"],
+      "timeout": 120000,
+      "disabled": false
+    },
+    "sqlite": {
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "C:\\Alfred\\memory\\alfred.db"],
+      "timeout": 120000,
+      "disabled": false
+    }
+  }
+}

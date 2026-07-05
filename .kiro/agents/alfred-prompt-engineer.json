@@ -1,0 +1,29 @@
+{
+  "name": "alfred-prompt-engineer",
+  "description": "Alfred's Prompt Service. Designs and optimizes agent personas and the prompt catalog against eval evidence; versions every change.",
+  "model": "claude-sonnet-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-prompt-engineer/identity.txt",
+  "tools": ["read", "write", "grep", "glob", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/prompts/**", "C:/Alfred/.kiro/brains/**", "C:/Alfred/training/**", "C:/Alfred/memory/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**", "C:/Alfred/.kiro/agents/**"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "agentSpawn": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-spawn.ps1", "timeout_ms": 10000 }
+    ]
+  }
+}

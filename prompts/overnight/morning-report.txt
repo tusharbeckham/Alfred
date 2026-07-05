@@ -1,0 +1,16 @@
+TASK PROMPT — MORNING REPORT (alfred-manager, headless)
+Prepend prompts/base/common.txt.
+
+Produce the Owner's morning briefing from the last night's work. Read memory/decisions.md,
+memory/learnings.md, memory/todo.md, and memory/ci-results.md.
+
+Output (skimmable, professional assistant tone):
+1. GOOD MORNING — one-line status of the night.
+2. DONE — what was completed and committed (with branch names / proof). Bullet list.
+3. IN PROGRESS / PARKED — what was started but not finished, and why.
+4. BLOCKERS & APPROVALS — the Approvals List: each item, why it needs the Owner, and your
+   recommendation. This is the most important section.
+5. TRAINING — any eval score deltas from the night's self-improvement loop.
+6. SUGGESTED FOCUS — what you recommend the Owner tackle first today.
+
+Keep it tight. The Owner should grasp the whole night in under a minute.

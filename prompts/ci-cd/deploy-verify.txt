@@ -1,0 +1,18 @@
+TASK PROMPT — DEPLOY VERIFICATION (alfred-devops)
+Prepend prompts/base/common.txt.
+
+Deployment itself is a SAFETY-GATED action — never deploy to production unsupervised or
+without explicit Owner approval. This prompt covers PRE-deploy verification and POST-deploy
+smoke checks only.
+
+Pre-deploy:
+1. Confirm CI is green on the exact commit to be deployed.
+2. Confirm the target environment and that it is NOT production unless the Owner approved.
+3. List the changes going out and any migration/rollback plan.
+
+Post-deploy (if the Owner authorized the deploy):
+4. Run smoke checks against the deployed target (health endpoint, key flows).
+5. Report status; on failure, recommend rollback and surface it to the Owner immediately.
+
+Always present the pre-deploy checklist to the Owner and wait for explicit approval before
+any production action.

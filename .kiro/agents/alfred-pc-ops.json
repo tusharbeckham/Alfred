@@ -1,0 +1,30 @@
+{
+  "name": "alfred-pc-ops",
+  "description": "Alfred's Windows PC manager. Read-first diagnostics via safe PowerShell; all system changes are safety-gated and Owner-approved.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-pc-ops/identity.txt",
+  "tools": ["read", "shell", "grep", "glob", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "knowledge"],
+  "toolsSettings": {
+    "shell": {
+      "denyByDefault": true,
+      "allowedCommands": ["Get-Process", "Get-Service", "Get-CimInstance", "Get-ComputerInfo", "Get-NetIPConfiguration", "Get-NetAdapter", "Get-WinEvent", "Get-Disk", "Get-Volume", "Get-PhysicalDisk", "Get-ChildItem", "Get-Item", "Test-Path", "Get-Content", "systeminfo", "dir", "Get-Uptime", "Get-Counter"],
+      "deniedCommands": ["rm\\s+-rf", "del\\s", "format\\s", "reg\\s+(add|delete)", "Remove-Item", "Stop-Process", "Stop-Service", "Set-", "New-Item", "shutdown", "Stop-Computer", "Restart-Computer"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "postToolUse": [
+      { "matcher": "shell", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/post-shell.ps1", "timeout_ms": 10000 }
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "alfred-agent-builder",
+  "description": "Alfred's agent smith. Creates and validates new agents and brains following the verified config pattern; registers them.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-agent-builder/identity.txt",
+  "tools": ["read", "write", "shell", "grep", "glob", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/.kiro/agents/**", "C:/Alfred/.kiro/brains/**", "C:/Alfred/memory/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**"]
+    },
+    "shell": {
+      "autoAllowReadonly": true,
+      "allowedCommands": ["kiro-cli\\s+agent\\s+(validate|list)"],
+      "deniedCommands": ["rm\\s+-rf", "format\\s", "reg\\s+(add|delete)", "Remove-Item.*-Recurse", "git\\s+push.*(main|master)", "shutdown", "Stop-Computer"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "stop": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-stop.ps1", "timeout_ms": 15000 }
+    ]
+  }
+}

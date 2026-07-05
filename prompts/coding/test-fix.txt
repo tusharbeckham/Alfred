@@ -1,0 +1,16 @@
+TASK PROMPT — FIX FAILING TESTS (alfred-debugger + alfred-coder loop)
+Prepend prompts/base/common.txt.
+
+Goal: make the test suite green without weakening the tests.
+
+Loop (iterate-until-green, bounded):
+1. RUN the tests. Capture the exact failing output.
+2. DIAGNOSE the root cause. Read the failing code and the test. Do not guess — form a
+   hypothesis supported by the error.
+3. FIX the smallest change that addresses the root cause. Never delete or trivially weaken
+   a test to force a pass; if a test is genuinely wrong, explain why before changing it.
+4. RE-RUN. If still failing and attempts remain, repeat from step 2 with what you learned.
+5. STOP when green, or after the attempt bound — then report the diagnosis and escalate.
+
+Report: root cause, the fix, before/after test output, and any test you believe is
+incorrect (with justification).

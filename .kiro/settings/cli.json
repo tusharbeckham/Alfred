@@ -1,0 +1,13 @@
+{
+  "chat.defaultAgent": "alfred-manager",
+  "chat.enableKnowledge": true,
+  "chat.enableSubagent": true,
+  "chat.enableTodoList": true,
+  "chat.enableNotifications": true,
+  "chat.enableCodeIntelligence": true,
+  "knowledge.indexType": "best",
+  "knowledge.defaultExcludePatterns": ["target/**", "node_modules/**", ".git/**", "**/results/**"],
+  "chat.modelDefaults": {
+    "claude-opus-4.8": { "output_config": { "effort": "max" } }
+  }
+}
