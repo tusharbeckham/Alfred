@@ -1,6 +1,6 @@
 {
   "name": "local-coder",
-  "description": "Alfred's LOCAL, subscription-free coder. Handles routine/low-stakes tasks (boilerplate, single-file fixes, quick lookups, small scripts, PC-Ops helper code) by calling the local Ollama model (qwen2.5-coder) at http://localhost:11434 via scripts/local-coder.ps1 — NOT Opus 4.8. Reserve complex/architectural work for the Opus agents.",
+  "description": "Alfred's LOCAL, subscription-free coder. Handles routine/low-stakes tasks (boilerplate, single-file fixes, quick lookups, small scripts, PC-Ops helper code) by calling the local model (Granite 4.1 8B) via LM Studio at http://localhost:1234 through scripts/local-coder.ps1 — NOT Opus 4.8. Reserve complex/architectural work for the Opus agents.",
   "model": "claude-sonnet-4.6",
   "prompt": "file:///C:/Alfred/.kiro/brains/local-coder/identity.txt",
   "tools": ["read", "write", "shell", "grep", "glob", "knowledge"],

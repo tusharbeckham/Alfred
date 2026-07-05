@@ -1,47 +1,50 @@
-# Alfred-Coder — LM Studio setup (Qwen3-Coder-30B-A3B)
+# Alfred-Coder — LM Studio setup (IBM Granite 4.1 8B)
 
-The one gated step: installing LM Studio. Do this, then load the model. Alfred talks to LM
-Studio's OpenAI-compatible server over HTTP — no chat window needed for automation.
+Base model: **IBM Granite 4.1 8B Instruct** (Apache-2.0). Chosen because it fits this machine
+comfortably, beats qwen2.5-coder-7B on coding, and fine-tunes on a FREE Colab/Kaggle GPU.
 
-## Verified target
-- Model: **Qwen3-Coder-30B-A3B-Instruct** (Apache-2.0). MoE: 30B total, ~3.3B active/token →
-  ~10 tok/s on CPU-only. Q4_K_M GGUF ≈ 18.7 GB (fits your 24 GB; leaves ~4–8K context).
-- Your hardware: CPU-only, 24 GB RAM. No GPU needed to *run* it (MoE makes it feasible).
+## Why this model (for a 24 GB, CPU-only machine)
+- Q4_K_M GGUF ≈ **5.5 GB** → runs with your browser open (you have ~9–10 GB free normally).
+- 87.2% HumanEval — strongest sub-10B coder; released Apr 2026 (newer than qwen2.5-coder).
+- Apache-2.0 → your fine-tuned derivative is fully yours.
+- CPU speed: expect ~3–8 tok/s on the Core Ultra 5 125H (fine for a coding assistant).
+- Bigger model (qwen3-coder-30B) is the future upgrade once on Arch Linux / more free RAM.
 
-## Step 1 — Install LM Studio (needs your OK; system-wide install)
-- Download: https://lmstudio.ai  → run the installer, OR
-- I can install it for you: `winget search lmstudio` then `winget install <id>` (tell me to proceed).
+## Status
+- LM Studio: **installed** (winget `ElementLabs.LMStudio`).
 
-## Step 2 — Download the model (inside LM Studio)
-1. Open LM Studio → the search/discover tab.
-2. Search: `Qwen3-Coder-30B-A3B`.
-3. Pick a GGUF quant:
-   - `Q4_K_M` (~18.7 GB) — best quality that fits; ~4–8K context headroom.
-   - `Q3_K_M` (~16 GB) — a bit lower quality but leaves more room for context.
-   - `unsloth` "UD-Q4_K_XL" dynamic quant is a good pick if listed.
-4. Download (needs ~19 GB free disk — you have 1 TB, fine).
+## Step 1 — Download the model (in LM Studio)
+1. Search: `granite-4.1-8b`.
+2. Download **`granite-4.1-8b-instruct`**, quant **Q4_K_M** (~5.5 GB).
+   - Use *instruct* for Alfred (task in → code out). The *base* variant is only for raw
+     editor autocomplete/FIM.
+   - Repo: `lmstudio-community/granite-4.1-8b-GGUF`.
 
-## Step 3 — Load + tune settings
-- Load the model. Set **context length** to 4096–8192 (higher will exhaust RAM).
-- Leave GPU offload at 0 (CPU) — or try a few layers on your integrated GPU (Vulkan) for a
-  small speed bump; if it gets unstable, set it back to 0.
-- Enable **mmap** if offered (lets the OS page the model efficiently).
+## Step 2 — Load + context
+- Load the model. Set **context length = 8192** to start.
+- Context vs RAM (important): Granite supports up to 131K tokens, but each token of context
+  uses extra "KV cache" RAM. On 24 GB, practical context is ~8K comfortable, ~16–32K if you
+  free RAM; full 131K needs far more RAM (Arch Linux / GPU later).
+- Optional: enable **KV-cache quantization** (Q8/Q4) to fit more context in the same RAM.
+- GPU offload: try a few layers on the integrated Arc GPU (Vulkan) for a small speed bump; set
+  back to 0 if unstable.
 
-## Step 4 — Test + check speed
-- In LM Studio chat: "Write a PowerShell function that returns the largest of three numbers."
-- Watch the tok/s readout. Expect ~8–12 tok/s. If it's much lower, drop to Q3_K_M or reduce context.
+## Step 3 — Test + speed
+- Chat test: "Write a PowerShell function that returns the largest of three numbers."
+- Note the tok/s (expect ~3–8). Tell Alfred the number.
 
-## Step 5 — Turn on the local server (this is how Alfred uses it)
-- LM Studio → **Developer / Local Server** tab → **Start Server**.
-- Default endpoint: `http://localhost:1234/v1` (OpenAI-compatible).
-- Quick check (PowerShell): `(Invoke-RestMethod http://localhost:1234/v1/models).data.id`
+## Step 4 — Start the local server (how Alfred uses it)
+- Developer / Local Server tab → **Start Server** → `http://localhost:1234/v1` (OpenAI-compatible).
+- Check: `(Invoke-RestMethod http://localhost:1234/v1/models).data.id`
 
-## Step 6 — Wire into Alfred (I'll do this once the server is up)
-- `scripts/local-coder.ps1` currently targets Ollama (`:11434`). I'll retarget it to LM Studio's
-  OpenAI endpoint (`:1234/v1/chat/completions`) and flip routing to hybrid: local Alfred-Coder for
-  routine/low-stakes work, Kiro/Opus for the hard/architectural work.
+## Step 5 — Wire into Alfred (I do this once the server is up)
+- Retarget `scripts/local-coder.ps1` from Ollama (:11434) to LM Studio (`:1234/v1/chat/completions`).
+- Flip routing to hybrid: local Granite for routine/low-stakes; Kiro/Opus for hard/architectural.
 
-## Notes
-- This replaces the earlier Ollama plan. Same idea (local REST API), better host for you (GUI +
-  optional iGPU offload).
-- Fine-tuning happens later on Colab (see `notebooks/alfred-coder-finetune-colab.ipynb`), never on this CPU.
+## Fine-tuning (later, FREE)
+- Use `notebooks/alfred-coder-finetune-colab.ipynb` on **Kaggle** (free ~30h/week T4) or Colab.
+- 8B QLoRA fits a free T4 — no Colab Pro needed. Export GGUF → load back here as your Alfred-Coder.
+
+## Upgrade path ("better in future")
+- On Arch Linux (much lower RAM overhead) or with a GPU, re-seed onto qwen3-coder-30B using your
+  accumulated fine-tune data. Same pipeline, bigger brain.
