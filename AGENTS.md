@@ -57,6 +57,8 @@ optimization**, never model-weight training.
 - **alfred-data** — data analysis.
 - **alfred-math** — mathematics: proofs, numerical methods, scientific ML; generates verified fine-tune data.
 - **alfred-physics** — physics: mechanics/E&M/quantum/thermo, PINNs, simulation; generates verified fine-tune data.
+- **alfred-backend** — backend engineering: APIs, data modeling, auth, caching, queues, services, IaC, observability.
+- **alfred-ml** — ML engineering: data/training pipelines, evaluation, MLOps, LoRA/QLoRA fine-tuning; owns the local-model fine-tune workflow.
 
 ### Tier 3 — Meta-Agents (agents that manage agents)
 - **alfred-evaluator** (opus 4.6+) — runs the training evals.
