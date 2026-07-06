@@ -1,50 +1,48 @@
-# Alfred-Coder — LM Studio setup (IBM Granite 4.1 8B)
+# Alfred-Coder — LM Studio setup (Qwen2.5-Coder-7B)
 
-Base model: **IBM Granite 4.1 8B Instruct** (Apache-2.0). Chosen because it fits this machine
-comfortably, beats qwen2.5-coder-7B on coding, and fine-tunes on a FREE Colab/Kaggle GPU.
+Base model: **Qwen2.5-Coder-7B-Instruct** (Apache-2.0). Chosen because it is a top-tier open
+coding model AND it fine-tunes cleanly on a FREE Kaggle/Colab T4 — the whole point of the
+hybrid tier (run it locally, improve it for free).
 
 ## Why this model (for a 24 GB, CPU-only machine)
-- Q4_K_M GGUF ≈ **5.5 GB** → runs with your browser open (you have ~9–10 GB free normally).
-- 87.2% HumanEval — strongest sub-10B coder; released Apr 2026 (newer than qwen2.5-coder).
+- Q4_K_M GGUF ≈ **4.7 GB** → runs with your browser open (you have ~9–10 GB free normally).
+- Strong, well-supported coder; huge ecosystem support for QLoRA fine-tuning (Kaggle/Colab).
 - Apache-2.0 → your fine-tuned derivative is fully yours.
-- CPU speed: expect ~3–8 tok/s on the Core Ultra 5 125H (fine for a coding assistant).
-- Bigger model (qwen3-coder-30B) is the future upgrade once on Arch Linux / more free RAM.
+- CPU speed: expect a few tok/s on the Core Ultra 5 125H (fine for a coding assistant).
+- Upgrade path: Qwen2.5-Coder-14B/32B once on more free RAM or a GPU — same pipeline, bigger brain.
 
-## Status
-- LM Studio: **installed** (winget `ElementLabs.LMStudio`).
+> Note: Granite 4.1 8B was the earlier pick. We moved to Qwen2.5-Coder-7B because Granite's
+> architecture does not fine-tune on a free Kaggle T4, and free fine-tuning is a core goal.
 
-## Step 1 — Download the model (in LM Studio)
-1. Search: `granite-4.1-8b`.
-2. Download **`granite-4.1-8b-instruct`**, quant **Q4_K_M** (~5.5 GB).
-   - Use *instruct* for Alfred (task in → code out). The *base* variant is only for raw
-     editor autocomplete/FIM.
-   - Repo: `lmstudio-community/granite-4.1-8b-GGUF`.
+## Download (scripted)
+```powershell
+& "$env:USERPROFILE\.lmstudio\bin\lms.exe" get qwen2.5-coder-7b-instruct --gguf -y
+```
+Or in the LM Studio GUI: search `qwen2.5-coder-7b-instruct`, download the **Q4_K_M** GGUF.
 
-## Step 2 — Load + context
-- Load the model. Set **context length = 8192** to start.
-- Context vs RAM (important): Granite supports up to 131K tokens, but each token of context
-  uses extra "KV cache" RAM. On 24 GB, practical context is ~8K comfortable, ~16–32K if you
-  free RAM; full 131K needs far more RAM (Arch Linux / GPU later).
+## Load + context
+```powershell
+& "$env:USERPROFILE\.lmstudio\bin\lms.exe" load qwen2.5-coder-7b-instruct -y
+```
+- Set **context length = 8192** to start. Larger context uses more KV-cache RAM; on 24 GB,
+  ~8K is comfortable, ~16–32K if you free RAM.
 - Optional: enable **KV-cache quantization** (Q8/Q4) to fit more context in the same RAM.
-- GPU offload: try a few layers on the integrated Arc GPU (Vulkan) for a small speed bump; set
-  back to 0 if unstable.
+- GPU offload: try a few layers on the integrated Arc GPU (Vulkan) for a small speed bump.
 
-## Step 3 — Test + speed
-- Chat test: "Write a PowerShell function that returns the largest of three numbers."
-- Note the tok/s (expect ~3–8). Tell Alfred the number.
+## Start the local server (how Alfred uses it)
+```powershell
+& "$env:USERPROFILE\.lmstudio\bin\lms.exe" server start
+(Invoke-RestMethod http://localhost:1234/v1/models).data.id
+```
+Serves an OpenAI-compatible API at `http://localhost:1234/v1`.
 
-## Step 4 — Start the local server (how Alfred uses it)
-- Developer / Local Server tab → **Start Server** → `http://localhost:1234/v1` (OpenAI-compatible).
-- Check: `(Invoke-RestMethod http://localhost:1234/v1/models).data.id`
+## Wire into Alfred
+- `scripts/local-coder.ps1` targets LM Studio (`:1234/v1/chat/completions`), default model
+  `qwen2.5-coder-7b-instruct`.
+- Routing is hybrid (`.kiro/steering/routing.md`): local Qwen for routine/low-stakes; Kiro/Opus
+  for hard/architectural.
 
-## Step 5 — Wire into Alfred (I do this once the server is up)
-- Retarget `scripts/local-coder.ps1` from Ollama (:11434) to LM Studio (`:1234/v1/chat/completions`).
-- Flip routing to hybrid: local Granite for routine/low-stakes; Kiro/Opus for hard/architectural.
-
-## Fine-tuning (later, FREE)
-- Use `notebooks/alfred-coder-finetune-colab.ipynb` on **Kaggle** (free ~30h/week T4) or Colab.
-- 8B QLoRA fits a free T4 — no Colab Pro needed. Export GGUF → load back here as your Alfred-Coder.
-
-## Upgrade path ("better in future")
-- On Arch Linux (much lower RAM overhead) or with a GPU, re-seed onto qwen3-coder-30B using your
-  accumulated fine-tune data. Same pipeline, bigger brain.
+## Fine-tuning (FREE)
+- `notebooks/alfred-coder-finetune-colab.ipynb` (or the Kaggle kernel in `kaggle/kernel/`) runs
+  QLoRA on a free T4 using Kaggle's stock, GPU-matched stack (no Unsloth/torch reinstall — that
+  broke CUDA on Kaggle). Export GGUF → load back here as your bespoke Alfred-Coder.

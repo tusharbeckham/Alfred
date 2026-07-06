@@ -71,20 +71,22 @@ optimization**, never model-weight training.
 `local-coder` is an **optional 20th agent** layered on top of the core 19. It exists purely
 to save Kiro/Opus credits: routine, low-stakes coding (boilerplate, single-file fixes, quick
 lookups, small scripts, PC-Ops helper snippets) is handled by a **free local model**
-(`qwen2.5-coder` via Ollama at `http://localhost:11434`) instead of Opus 4.8 / 4.6.
+(**Qwen2.5-Coder-7B** via LM Studio's OpenAI-compatible API at `http://localhost:1234`) instead
+of Opus 4.8 / 4.6.
 
 - **Config:** `.kiro/agents/local-coder.json` (a thin `sonnet` dispatcher) →
   `.kiro/brains/local-coder/identity.txt`. The actual code generation runs locally through
-  `scripts/local-coder.ps1`, which calls Ollama's **REST API** (never the `ollama run` CLI,
-  never a premium model).
-- **Routing:** `.kiro/steering/routing.md` decides local vs Opus. It ships **DISABLED** —
-  flip `LOCAL_CODER_ROUTING = ENABLED` only after Ollama is installed and `qwen2.5-coder`
-  responds. While disabled, all coding goes to the Opus agents exactly as before.
+  `scripts/local-coder.ps1`, which calls LM Studio's **OpenAI-compatible REST API** (never
+  a premium model).
+- **Routing:** `.kiro/steering/routing.md` decides local vs Opus. It is **ENABLED** — routine,
+  low-stakes coding goes to the local model; set `LOCAL_CODER_ROUTING = DISABLED` to send all
+  coding to the Opus agents as before.
 - **Not for:** multi-file/architectural, security/auth, infra/prod, or ambiguous work — those
   stay with the Opus agents. local-coder escalates rather than guessing or silently upgrading.
-- **Fine-tuning (future):** `scripts/build-finetune-jsonl.ps1` builds the dataset;
-  `notebooks/local-coder-finetune-colab.ipynb` trains on Colab's free GPU (NOT locally — this
-  machine has no dedicated GPU); `docs/local-coder/` documents the whole flow end-to-end.
+- **Fine-tuning (FREE):** `scripts/build-finetune-jsonl.ps1` builds the dataset;
+  `notebooks/alfred-coder-finetune-colab.ipynb` (or the Kaggle kernel in `kaggle/kernel/`) runs
+  QLoRA on a free Kaggle/Colab T4 using the stock GPU-matched stack (NOT locally — this machine
+  has no dedicated GPU); `docs/local-coder/` documents the whole flow end-to-end.
 - **Why it's here:** so this tier isn't lost or rebuilt later. It is strictly additive — it
   does not modify or replace any existing agent, hook, or MCP config.
 

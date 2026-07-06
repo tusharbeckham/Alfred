@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Alfred local-coder — zero-credit local coder via LM Studio (Granite 4.1 8B).
+  Alfred local-coder — zero-credit local coder via LM Studio (Qwen2.5-Coder-7B).
 
 .DESCRIPTION
   Calls LM Studio's OpenAI-compatible local server (http://localhost:1234/v1) so routine
@@ -9,7 +9,7 @@
   generation. Installs nothing; only talks to your local LM Studio server.
 
 .PARAMETER Prompt       The task/question. Required (positional).
-.PARAMETER Model        Model id as loaded in LM Studio. Default: granite-4.1-8b.
+.PARAMETER Model        Model id as loaded in LM Studio. Default: qwen2.5-coder-7b-instruct.
 .PARAMETER System       System prompt (concise, code-focused default).
 .PARAMETER ContextFile  Optional path whose contents are prepended as context.
 .PARAMETER BaseUrl      LM Studio base URL. Default http://localhost:1234/v1.
@@ -25,7 +25,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)][string]$Prompt,
-    [string]$Model      = 'granite-4.1-8b',
+    [string]$Model      = 'qwen2.5-coder-7b-instruct',
     [string]$System     = 'You are a precise, senior coding assistant. Return correct, minimal, working code. Prefer the language/style implied by the request. Add only brief, useful comments. If something is ambiguous, state your assumption in one line, then answer.',
     [string]$ContextFile,
     [string]$BaseUrl    = 'http://localhost:1234/v1',

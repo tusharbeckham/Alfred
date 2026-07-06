@@ -64,7 +64,7 @@ Inside a session:
 
 ## Local Coder (offline, credit-free)
 
-- **Alfred-Coder Tier**: Optional local tier running IBM Granite 4.1 8B via LM Studio's OpenAI-compatible API at `http://localhost:1234`, accessible through `scripts/local-coder.ps1`.
+- **Alfred-Coder Tier**: Optional local tier running Qwen2.5-Coder-7B via LM Studio's OpenAI-compatible API at `http://localhost:1234`, accessible through `scripts/local-coder.ps1`.
 - **Hybrid Routing**: Routine low-stakes coding tasks execute locally for free; complex or architectural work defaults to Kiro/Opus.
 - **Free Fine-Tuning**: Model can be fine-tuned without cost on Kaggle or Colab.
 - **Personalization**: Retrain and reload as a bespoke personal model.

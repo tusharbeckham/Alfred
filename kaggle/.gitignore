@@ -1,0 +1,6 @@
+# Kaggle run artifacts (keep kernel/ sources, ignore transient outputs)
+out*/
+ds/
+*.log
+*.log.err
+*.txt

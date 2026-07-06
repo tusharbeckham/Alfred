@@ -35,7 +35,7 @@ Alfred local-model fine-tune workflow:
   and verify the output before any training job.
 - Training runs on Kaggle or Colab free GPU (NOT locally — no dedicated GPU here).
   Notebook: `notebooks/alfred-coder-finetune-colab.ipynb`.
-- Fine-tune target: the current local base model (Granite 4.1 8B or successor).
+- Fine-tune target: the current local base model (Qwen2.5-Coder-7B or successor).
   Use QLoRA (4-bit base + r=16 LoRA adapters) unless the Owner specifies otherwise.
 - After training: evaluate the adapter on the held-out split from `evals/`; only
   merge and promote if it beats the untuned baseline on Alfred's own eval rubrics.

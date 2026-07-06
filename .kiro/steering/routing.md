@@ -4,14 +4,14 @@ inclusion: always
 
 # Alfred — Task Routing (local-coder vs Opus team)
 
-> **STATUS: ENABLED.** The local model (Granite 4.1 8B via LM Studio) is installed and responding.
+> **STATUS: ENABLED.** The local model (Qwen2.5-Coder-7B via LM Studio) is the free local coder.
 > Routine, low-stakes coding goes to `local-coder` (free); complex/architectural work stays with the
 > Opus agents. Set this back to DISABLED to send everything to the Opus agents as before.
 
 **LOCAL_CODER_ROUTING = ENABLED**
 
 ## Why this exists
-`local-coder` runs the free local model (Granite 4.1 8B via LM Studio at http://localhost:1234) so we
+`local-coder` runs the free local model (Qwen2.5-Coder-7B via LM Studio at http://localhost:1234) so we
 stop spending Opus credits on trivial tasks. Opus 4.8 / 4.6 stay reserved for work that needs them.
 
 ## The rule (alfred-manager / alfred-leader)
@@ -24,7 +24,7 @@ Triage each coding task BEFORE delegating.
 - Shallow: little cross-file or architectural reasoning.
 - Examples: boilerplate, a regex, a helper function, a single-file fix, a quick lookup, a small
   PC-Ops snippet, a unit test for one function.
-- Speed note: the local model runs ~3 tok/s on CPU — great for short outputs; for large generations prefer Opus.
+- Speed note: Qwen2.5-Coder-7B runs on CPU here — great for short outputs; for large generations prefer Opus.
 
 **Send to the Opus agents when ANY hold:**
 - Multi-file, cross-cutting, or architectural; design decisions/tradeoffs.
@@ -42,5 +42,5 @@ Triage each coding task BEFORE delegating.
 
 ## How to invoke the local path
 - Preferred (zero Kiro credits): `powershell -File scripts/local-coder.ps1 "<task>"`.
-- Requires LM Studio running with the model loaded: `lms server start` + `lms load granite-4.1-8b -y`.
+- Requires LM Studio running with the model loaded: `lms server start` + `lms load qwen2.5-coder-7b-instruct -y`.
 - Or delegate to the `local-coder` agent, which wraps that same script.
