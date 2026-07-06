@@ -31,7 +31,8 @@ param(
     [string]$BaseUrl    = 'http://localhost:1234/v1',
     [int]$MaxTokens     = 512,
     [int]$TimeoutSec    = 300,
-    [switch]$ShowStats
+    [switch]$ShowStats,
+    [switch]$Recall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,8 +44,14 @@ catch { Die "LM Studio server not reachable at $BaseUrl. Start it with:  lms ser
 $ids = @($models.data.id)
 if ($ids -notcontains $Model) { Die ("Model '$Model' is not loaded. Loaded: " + ($ids -join ', ') + ".  Load it with:  lms load $Model -y") 4 }
 
-# 2) Build the user content (optionally with a context file)
+# 2) Build the user content (optionally with recalled memory + a context file)
 $userContent = $Prompt
+if ($Recall) {
+    try {
+        $mem = & "$PSScriptRoot\alfred-recall.ps1" -Query $Prompt -TopK 4 -Raw 2>$null
+        if ($mem) { $userContent = "Relevant remembered context (from Alfred's memory):`n" + (@($mem) -join "`n") + "`n`nTask: $Prompt" }
+    } catch { }
+}
 if ($ContextFile) {
     if (-not (Test-Path -LiteralPath $ContextFile)) { Die "ContextFile not found: $ContextFile" 2 }
     $ctx = Get-Content -LiteralPath $ContextFile -Raw
