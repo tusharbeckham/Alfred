@@ -25,8 +25,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)][string]$Prompt,
-    [string]$Model      = 'qwen2.5-coder-7b-instruct',
-    [string]$System     = 'You are a precise, senior coding assistant. Return correct, minimal, working code. Prefer the language/style implied by the request. Add only brief, useful comments. If something is ambiguous, state your assumption in one line, then answer.',
+    [string]$Model      = 'alfred-coder-7b',
+    [string]$System     = 'You are local-coder, a precise coding assistant. Return correct, minimal, working code in the requested language, matching a Windows/PowerShell-first, concise style.',
     [string]$ContextFile,
     [string]$BaseUrl    = 'http://localhost:1234/v1',
     [int]$MaxTokens     = 512,

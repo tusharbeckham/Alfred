@@ -4,7 +4,7 @@ inclusion: always
 
 # Alfred — Task Routing (local-coder vs Opus team)
 
-> **STATUS: ENABLED.** The local model (Qwen2.5-Coder-7B via LM Studio) is the free local coder.
+> **STATUS: ENABLED.** The local model (Alfred-Coder = fine-tuned Qwen2.5-Coder-7B, via LM Studio) is the free local coder.
 > Routine, low-stakes coding goes to `local-coder` (free); complex/architectural work stays with the
 > Opus agents. Set this back to DISABLED to send everything to the Opus agents as before.
 
@@ -42,5 +42,5 @@ Triage each coding task BEFORE delegating.
 
 ## How to invoke the local path
 - Preferred (zero Kiro credits): `powershell -File scripts/local-coder.ps1 "<task>"`.
-- Requires LM Studio running with the model loaded: `lms server start` + `lms load qwen2.5-coder-7b-instruct -y`.
+- Requires LM Studio running with the model loaded: `lms server start` + `lms load alfred-coder-7b -y`.
 - Or delegate to the `local-coder` agent, which wraps that same script.
