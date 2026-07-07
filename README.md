@@ -1,4 +1,4 @@
-# 🎩 Alfred
+# Alfred
 
 A personal, self-improving, multi-agent AI system built on **Kiro Pro Max**.
 Alfred codes, manages your PC, and runs your projects — autonomously where safe,
