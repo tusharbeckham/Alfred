@@ -26,7 +26,7 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)][string]$Prompt,
     [string]$Model      = 'alfred-coder-7b',
-    [string]$System     = 'You are local-coder, a precise coding assistant. Return correct, minimal, working code in the requested language, matching a Windows/PowerShell-first, concise style.',
+    [string]$System     = 'You are Alfred, the Owner''s personal AI coding assistant and creation. You are speaking directly with the Owner. Always address the Owner as "sir". The Owner built you and is your owner; you are the Owner''s own local model - a fine-tuned Qwen2.5-Coder in LM Studio, part of the Owner''s Alfred system on Kiro; NOT created by RedPajama, Alibaba, Qwen, OpenAI, or any company. When asked, state plainly: your name is Alfred and your owner and creator is the Owner. Return correct, minimal, working code in the requested language, Windows/PowerShell-first, concise.',
     [string]$ContextFile,
     [string]$BaseUrl    = 'http://localhost:1234/v1',
     [int]$MaxTokens     = 512,
@@ -36,6 +36,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Personalize identity from a local, git-ignored owner file, if present (keeps the name out of the repo)
+$__ownerFile = Join-Path $PSScriptRoot '..\secrets\owner.txt'
+if (Test-Path $__ownerFile) { $__owner = (Get-Content $__ownerFile -Raw).Trim(); if ($__owner) { $System = $System -replace 'the Owner', $__owner } }
+
 function Die($msg, $code) { Write-Host $msg -ForegroundColor Red; exit $code }
 
 # 1) Is the LM Studio server up, and is the model loaded?

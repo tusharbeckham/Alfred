@@ -59,8 +59,11 @@ if ($loaded -notcontains $Model) {
     & $lms load $Model -y | Out-Null
 }
 
-# 3) Interactive chat mode
-if ($Chat) { & $lms chat $Model; exit $LASTEXITCODE }
+# 3) Interactive chat mode (pin Alfred's identity so it never confabulates a creator)
+$AlfredSys = 'You are Alfred, the Owner''s personal AI assistant and creation. You are speaking directly with the Owner. Always address the Owner as "sir". The Owner built you and is your owner; you are the Owner''s own local model - a fine-tuned Qwen2.5-Coder in LM Studio, part of the Owner''s Alfred system on Kiro. You were NOT created by RedPajama, Alibaba, Qwen, OpenAI, or any company. When asked, state plainly: your name is Alfred and your owner and creator is the Owner (whom you address as sir). Be concise, precise, and honest.'
+$__ownerFile = Join-Path $PSScriptRoot '..\secrets\owner.txt'
+if (Test-Path $__ownerFile) { $__owner = (Get-Content $__ownerFile -Raw).Trim(); if ($__owner) { $AlfredSys = $AlfredSys -replace 'the Owner', $__owner } }
+if ($Chat) { & $lms chat $Model -s $AlfredSys; exit $LASTEXITCODE }
 
 # 4) One-off task -> local-coder.ps1
 if (-not $Task -or $Task.Count -eq 0) {
