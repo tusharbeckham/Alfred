@@ -29,10 +29,10 @@ if ($Push) {
     $null = git rev-parse --is-inside-work-tree 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Host ("Not a git repository: " + (Get-Location).Path) -ForegroundColor Red; exit 1 }
     $msg = if ($Task -and $Task.Count -gt 0) { $Task -join ' ' } else { 'update' }
-    git add -A
-    if (-not (git diff --cached --name-only)) { Write-Host "Nothing to commit." -ForegroundColor Yellow; exit 0 }
-    git commit -m $msg | Out-Null
-    git push
+    git add -A 2>$null
+    if (-not (git diff --cached --name-only 2>$null)) { Write-Host "Nothing to commit." -ForegroundColor Yellow; exit 0 }
+    git commit -m $msg 2>$null | Out-Null
+    git push 2>$null
     if ($LASTEXITCODE -eq 0) { Write-Host ("Pushed: " + $msg) -ForegroundColor Green }
     else { Write-Host ("Push failed (exit " + $LASTEXITCODE + ")") -ForegroundColor Red }
     exit $LASTEXITCODE
