@@ -31,3 +31,9 @@ Thumbs.db
 # hardened secret ignores
 **/mail.json
 **/telegram.json
+
+# personal / local-only — kept on disk, never published to GitHub
+/memory/
+/data/finetune/
+/evals/results/
+*.gguf

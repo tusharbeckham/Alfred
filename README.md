@@ -1,74 +1,94 @@
 # Alfred
 
-A personal, self-improving, multi-agent AI system built on **Kiro Pro Max**.
-Alfred codes, manages your PC, and runs your projects — autonomously where safe,
-with your approval where it matters.
+> A personal, self-improving multi-agent AI system — with a **bespoke local coder you fine-tune and own**, persistent offline memory, and live web access.
 
-## What Alfred is
+![Kiro](https://img.shields.io/badge/Built%20on-Kiro-000000?style=flat-square)
+![Claude](https://img.shields.io/badge/Claude-Opus%20%2F%20Sonnet-D97757?style=flat-square)
+![Local LLM](https://img.shields.io/badge/Local-Qwen2.5--Coder%207B-615CED?style=flat-square)
+![QLoRA](https://img.shields.io/badge/Fine--tune-QLoRA%20(free)-EE4C2C?style=flat-square)
+![PowerShell](https://img.shields.io/badge/PowerShell-5391FE?style=flat-square&logo=powershell&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
 
-Alfred is an **orchestration layer** over Kiro's Claude models (Opus 4.8 / 4.6,
-Sonnet 4.6). 19 specialized agents across 4 tiers collaborate through DAG pipelines,
-each with its own **brain** (identity, reasoning, instincts, knowledge, memory, reflexes)
-and a shared **training system** that improves prompts and skills over time.
+Alfred is a personal AI operating layer: a coordinated team of specialized agents that **code, manage a Windows PC, and run projects** — backed by a locally fine-tuned model, persistent memory, and web access. It runs on frontier models when it matters and a **free, offline local model** for everything routine.
 
-> Alfred does **not** train model weights. "Training" = eval-driven prompt & skill
-> optimization. See `AGENTS.md`.
+---
 
-## Quick Start
+## Highlights
+
+- **Multi-agent orchestration** — an overseer plus 4 tiers of specialized agents (manager, leader, architect, coder, tester, reviewer, researcher, debugger, devops, security, docs, data, ML, backend, and more) that collaborate through DAG pipelines with loops and fan-in.
+- **Bespoke local coder (offline, $0)** — a **Qwen2.5-Coder-7B fine-tuned via QLoRA** on a free cloud GPU, served locally through LM Studio's OpenAI-compatible API. It learns the system's own voice, routing, and safety rules.
+- **Hybrid routing** — routine, low-stakes work runs on the free local model; complex, architectural, or sensitive work escalates to frontier models. Correctness over credit-savings.
+- **Persistent "megamind" memory** — structured episodic memory with **offline semantic recall** via a local embedding model, so the assistant remembers decisions and preferences **with or without the cloud**.
+- **Live web access** — keyless search + page-fetch available to every agent (and to the local model when online).
+- **Eval-driven self-improvement** — prompts and skills are optimized against versioned eval suites with regression guards.
+- **Safety-gated autonomy** — destructive, system, production, or secret-touching actions require explicit approval; unattended runs are sandboxed to project work.
+
+---
+
+## Architecture
+
+**Cognition — the Brain System.** Every agent has a 6-layer stack: identity (system prompt), reasoning effort, always-on instincts (steering), on-demand skills, persistent memory, and lifecycle reflexes (hooks).
+
+**Org chart (high level).**
+```
+Owner ─ Alfred (overseer)
+          └─ Manager ─ Leader ─ Workers (coder, tester, reviewer, researcher,
+                                          debugger, devops, security, docs, data,
+                                          ML, backend, math, physics, …)
+             plus meta-agents: evaluator, trainer, memory-curator, agent-builder
+```
+
+**Two kinds of "training."**
+- The **orchestration layer** improves via *eval-driven prompt & skill optimization* — never model-weight training.
+- The **local coder** is a *genuine QLoRA fine-tune* of an open model you own end-to-end.
+
+---
+
+## The local coder (offline & free)
+
+- Runs an open coding model (**Qwen2.5-Coder-7B**, fine-tuned) in **LM Studio** at an OpenAI-compatible endpoint — no API keys, no per-token cost.
+- **Fine-tune pipeline:** curate examples → build a chat-format dataset → **QLoRA on a free cloud GPU** → export a GGUF → load locally.
+- **One-command use** from any terminal:
+  ```powershell
+  alfred "write a PowerShell function that returns the 5 largest files in a folder"
+  ```
+- **Measure it:** eval suites + a local scorer capture behavior before/after a fine-tune.
+
+---
+
+## Quick start
 
 ```powershell
-# From the project root
-cd C:\Alfred
-
 # Talk to your assistant / production manager
 kiro-cli chat --agent alfred-manager
 
 # Or let the orchestrator run a task end-to-end
 kiro-cli chat --agent alfred-leader "Build a Python CLI word-counter with tests"
+
+# Or hit the free local coder directly
+alfred "add input validation to this function" 
 ```
 
-Inside a session:
-- `Ctrl+Shift+A` — jump to `alfred-manager`
-- `/agent` — list/switch agents
-- `/context show` — see loaded steering, skills, memory
-- `Ctrl+G` — monitor spawned subagents
+---
 
 ## Layout
 
 | Path | Purpose |
 |------|---------|
 | `AGENTS.md` | Top-level governance (mission, org chart, safety) |
-| `.kiro/agents/` | 19 agent configs |
+| `.kiro/agents/` | Agent configurations |
 | `.kiro/brains/` | Per-agent cognition (identity, memory, skills, reflexes) |
-| `.kiro/steering/` | Always-on rules (identity, conventions, safety, reporting, escalation) |
-| `.kiro/skills/` | On-demand domain expertise (11 skills) |
-| `.kiro/settings/` | CLI + MCP settings |
-| `prompts/` | Versioned prompt library |
-| `hooks/` | Lifecycle reflex scripts (PowerShell) |
-| `scripts/` | Automation: overnight, morning report, CI, training |
-| `evals/` | Eval datasets + rubrics + results |
-| `training/` | Prompt versions, A/B logs, improvement history |
-| `memory/` | Persistent decisions, learnings, todo, logs |
-| `mcp/` | Custom Alfred MCP server |
+| `.kiro/steering/` | Always-on rules (identity, safety, routing, reporting, memory, web) |
+| `.kiro/skills/` | On-demand domain expertise |
+| `scripts/` | Automation: local coder, memory, web, fine-tune builder, CI, training |
+| `evals/` | Eval datasets + rubrics |
+| `docs/` | Setup and workflow guides |
+| `notebooks/` | Fine-tune notebook |
 
-## Automation
+> Personal data — the memory trail, fine-tune datasets, eval outputs, and secrets — is kept **local-only** and git-ignored by design.
 
-| Script | What it does |
-|--------|--------------|
-| `scripts/overnight-run.ps1` | Works the `memory/todo.md` backlog overnight (sandboxed, CI-gated) |
-| `scripts/morning-report.ps1` | Briefs you at dawn from `memory/` |
-| `scripts/ci-run.ps1` | Runs tests/lint/build; gates commits |
-| `scripts/train.ps1` | Runs the eval-driven self-improvement loop |
-| `scripts/run-eval-loop.ps1` | Runs evals on demand |
-| `scripts/spawn-agent.ps1` | Scaffolds + validates a new agent |
+---
 
-## Local Coder (offline, credit-free)
+## Tech
 
-- **Alfred-Coder Tier**: Optional local tier running Qwen2.5-Coder-7B via LM Studio's OpenAI-compatible API at `http://localhost:1234`, accessible through `scripts/local-coder.ps1`.
-- **Hybrid Routing**: Routine low-stakes coding tasks execute locally for free; complex or architectural work defaults to Kiro/Opus.
-- **Free Fine-Tuning**: Model can be fine-tuned without cost on Kaggle or Colab.
-- **Personalization**: Retrain and reload as a bespoke personal model.
-- **Offline Capability**: Fully functional without internet access, ideal for isolated environments.
-- **Ease of Use**: Simple script invocation ensures seamless integration into existing workflows.
-
-See `implementation-plan.md` for the full design and build sequence.
+Kiro · Claude (Opus / Sonnet) · LM Studio · Qwen2.5-Coder · Unsloth · QLoRA · local embeddings (RAG-style memory) · MCP · PowerShell · Python.

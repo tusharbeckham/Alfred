@@ -1,4 +1,4 @@
-# Alfred — Email control setup (Gmail: tusharentheoria@gmail.com)
+# Alfred — Email control setup (Gmail: you@gmail.com)
 
 Alfred will READ and DRAFT email freely; **SENDING always needs your explicit approval**.
 Your credentials stay LOCAL — never committed (`secrets/` is git-ignored) and never pasted in chat.
@@ -11,7 +11,7 @@ Your credentials stay LOCAL — never committed (`secrets/` is git-ignored) and 
 
    ```json
    {
-     "email": "tusharentheoria@gmail.com",
+     "email": "you@gmail.com",
      "app_password": "the 16-char code (spaces are fine)",
      "imap_host": "imap.gmail.com",
      "smtp_host": "smtp.gmail.com",
