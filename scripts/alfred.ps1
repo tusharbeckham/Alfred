@@ -4,7 +4,7 @@
   git commit+push. No Kiro, no credits.
 
 .DESCRIPTION
-  - alfred "task"        -> run a coding task on the local model (Granite via LM Studio)
+  - alfred "task"        -> run a coding task on the local model (Alfred-Coder via LM Studio)
   - alfred -Chat         -> interactive local chat
   - alfred -Push "msg"   -> git add -A + commit + push in the CURRENT folder (NO model needed)
 
@@ -15,7 +15,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, ValueFromRemainingArguments = $true)][string[]]$Task,
-    [string]$Model = 'granite-4.1-8b',
+    [string]$Model = 'alfred-coder-7b',
     [string]$ContextFile,
     [switch]$Chat,
     [switch]$Push,
@@ -25,6 +25,7 @@ $ErrorActionPreference = 'Stop'
 
 # -Push: deterministic git add + commit + push in the CURRENT directory (no model involved).
 if ($Push) {
+    $ErrorActionPreference = 'Continue'   # git prints warnings (e.g. LF/CRLF) to stderr; keep them non-fatal so the commit+push completes
     $null = git rev-parse --is-inside-work-tree 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Host ("Not a git repository: " + (Get-Location).Path) -ForegroundColor Red; exit 1 }
     $msg = if ($Task -and $Task.Count -gt 0) { $Task -join ' ' } else { 'update' }
