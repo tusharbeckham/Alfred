@@ -37,10 +37,12 @@ Triage each coding task BEFORE delegating.
 ## Escalation (never a silent downgrade)
 - `local-coder` escalates back to the orchestrator with a one-line reason; it must NOT fall back to a
   premium model to "just do it," and the Opus agents must NOT be bypassed for anything meeting a trigger above.
-- If LM Studio is unreachable, `scripts/local-coder.ps1` exits non-zero; treat that task as if routing were
-  DISABLED (send it to the Opus agents) and note the local model is down.
+- `scripts/local-coder.ps1` now **auto-starts LM Studio and loads the model on demand** (via `scripts/lms-ready.ps1`,
+  which polls until the server + model are actually ready). It only exits non-zero if LM Studio genuinely cannot
+  start/load; treat that as routing DISABLED (send the task to the Opus agents) and note the local model is down.
 
 ## How to invoke the local path
 - Preferred (zero Kiro credits): `powershell -File scripts/local-coder.ps1 "<task>"`.
-- Requires LM Studio running with the model loaded: `lms server start` + `lms load alfred-coder-7b -y`.
+- **Auto-starts** LM Studio + loads the model on first use (via `scripts/lms-ready.ps1`) — no manual
+  `lms server start` / `lms load` needed. To pre-warm manually: `lms server start` + `lms load alfred-coder-7b -y`.
 - Or delegate to the `local-coder` agent, which wraps that same script.

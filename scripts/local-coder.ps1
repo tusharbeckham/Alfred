@@ -43,11 +43,9 @@ if (Test-Path $__ownerFile) { $__owner = (Get-Content $__ownerFile -Raw).Trim();
 
 function Die($msg, $code) { Write-Host $msg -ForegroundColor Red; exit $code }
 
-# 1) Is the LM Studio server up, and is the model loaded?
-try { $models = Invoke-RestMethod "$BaseUrl/models" -TimeoutSec 5 }
-catch { Die "LM Studio server not reachable at $BaseUrl. Start it with:  lms server start   (see docs\local-coder\LM-STUDIO-SETUP.md)." 3 }
-$ids = @($models.data.id)
-if ($ids -notcontains $Model) { Die ("Model '$Model' is not loaded. Loaded: " + ($ids -join ', ') + ".  Load it with:  lms load $Model -y") 4 }
+# 1) Ensure the LM Studio server is up AND the model is loaded (auto-start + wait; self-healing).
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'lms-ready.ps1') -Model $Model -BaseUrl $BaseUrl -Quiet
+if ($LASTEXITCODE -ne 0) { Die "Local model unavailable: LM Studio couldn't be started/loaded (code $LASTEXITCODE). See docs\local-coder\LM-STUDIO-SETUP.md." $LASTEXITCODE }
 
 # 2) Build the user content (optionally with recalled memory + a context file)
 $userContent = $Prompt

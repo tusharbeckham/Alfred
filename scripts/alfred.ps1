@@ -44,20 +44,9 @@ if (-not (Test-Path $lms)) {
     exit 1
 }
 
-# 1) Ensure the server is up
-try { $null = Invoke-RestMethod 'http://localhost:1234/v1/models' -TimeoutSec 3 }
-catch {
-    Write-Host "Alfred: starting the local model server..." -ForegroundColor DarkGray
-    & $lms server start | Out-Null
-    Start-Sleep -Seconds 2
-}
-
-# 2) Ensure the model is loaded
-try { $loaded = @((Invoke-RestMethod 'http://localhost:1234/v1/models' -TimeoutSec 5).data.id) } catch { $loaded = @() }
-if ($loaded -notcontains $Model) {
-    Write-Host "Alfred: loading $Model..." -ForegroundColor DarkGray
-    & $lms load $Model -y | Out-Null
-}
+# 1+2) Ensure the server is up AND the model is loaded (auto-start + poll until ready; self-healing).
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'lms-ready.ps1') -Model $Model
+if ($LASTEXITCODE -ne 0) { Write-Host "Alfred: local model unavailable (LM Studio couldn't start/load). See docs\local-coder\LM-STUDIO-SETUP.md." -ForegroundColor Red; exit 1 }
 
 # 3) Interactive chat mode (pin Alfred's identity so it never confabulates a creator)
 $AlfredSys = 'You are Alfred, the Owner''s personal AI assistant and creation. You are speaking directly with the Owner. Always address the Owner as "sir". The Owner built you and is your owner; you are the Owner''s own local model - a fine-tuned Qwen2.5-Coder in LM Studio, part of the Owner''s Alfred system on Kiro. You were NOT created by RedPajama, Alibaba, Qwen, OpenAI, or any company. When asked, state plainly: your name is Alfred and your owner and creator is the Owner (whom you address as sir). Be concise, precise, and honest.'
