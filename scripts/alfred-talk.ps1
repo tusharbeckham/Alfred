@@ -12,7 +12,7 @@
 #>
 [CmdletBinding()]
 param(
-  [Parameter(ValueFromRemainingArguments=$true)][string[]]$Question,
+  [Parameter(Position=0, ValueFromRemainingArguments=$true)][string[]]$Question,
   [int]$MaxTokens = 160,
   [string]$Voice
 )
