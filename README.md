@@ -1,6 +1,6 @@
 # Alfred
 
-> A personal, self-improving multi-agent AI system — with a **bespoke local coder you fine-tune and own**, persistent offline memory, and live web access.
+> A personal, self-improving multi-agent AI system — with a **bespoke local coder you fine-tune and own**, persistent offline memory, live web access, and an **offline voice**.
 
 ![Kiro](https://img.shields.io/badge/Built%20on-Kiro-000000?style=flat-square)
 ![Claude](https://img.shields.io/badge/Claude-Opus%20%2F%20Sonnet-D97757?style=flat-square)
@@ -8,6 +8,7 @@
 ![QLoRA](https://img.shields.io/badge/Fine--tune-QLoRA%20(free)-EE4C2C?style=flat-square)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5391FE?style=flat-square&logo=powershell&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
+![Voice](https://img.shields.io/badge/Voice-Piper%20TTS%20(offline)-8A2BE2?style=flat-square)
 
 Alfred is a personal AI operating layer: a coordinated team of specialized agents that **code, manage a Windows PC, and run projects** — backed by a locally fine-tuned model, persistent memory, and web access. It runs on frontier models when it matters and a **free, offline local model** for everything routine.
 
@@ -20,6 +21,7 @@ Alfred is a personal AI operating layer: a coordinated team of specialized agent
 - **Hybrid routing** — routine, low-stakes work runs on the free local model; complex, architectural, or sensitive work escalates to frontier models. Correctness over credit-savings.
 - **Persistent "megamind" memory** — structured episodic memory in a **local SQLite database (FTS5, sub-millisecond recall)** plus **offline semantic recall** via a local embedding model, so the assistant remembers decisions and preferences **with or without the cloud**.
 - **Live web access** — keyless search + page-fetch available to every agent (and to the local model when online).
+- **Offline voice** — Alfred *speaks*: a local **neural text-to-speech voice (Piper)** with a built-in Windows fallback. Ask a question and hear the answer — `ask`, `talk`, and `say`, all offline, no keys.
 - **Eval-driven self-improvement** — prompts and skills are optimized against versioned eval suites with regression guards.
 - **Safety-gated autonomy** — destructive, system, production, or secret-touching actions require explicit approval; unattended runs are sandboxed to project work.
 
@@ -65,6 +67,11 @@ kiro-cli chat --agent alfred-manager
 # Or let the orchestrator run a task end-to-end
 kiro-cli chat --agent alfred-leader "Build a Python CLI word-counter with tests"
 
+# Talk to Alfred out loud (offline neural voice)
+ask "what's the fastest way to find big files on my PC?"   # one spoken answer
+talk                                                         # a back-and-forth voice chat
+say "good evening, sir"                                      # speak any text
+
 # Or hit the free local coder directly
 alfred "add input validation to this function" 
 ```
@@ -80,7 +87,7 @@ alfred "add input validation to this function"
 | `.kiro/brains/` | Per-agent cognition (identity, memory, skills, reflexes) |
 | `.kiro/steering/` | Always-on rules (identity, safety, routing, reporting, memory, web) |
 | `.kiro/skills/` | On-demand domain expertise |
-| `scripts/` | Automation: local coder, memory, web, fine-tune builder, CI, training |
+| `scripts/` | Automation: local coder, memory, web, **voice (TTS)**, fine-tune builder, CI, training |
 | `evals/` | Eval datasets + rubrics |
 | `docs/` | Setup and workflow guides |
 | `notebooks/` | Fine-tune notebook |
@@ -91,4 +98,4 @@ alfred "add input validation to this function"
 
 ## Tech
 
-Kiro · Claude (Opus / Sonnet) · LM Studio · Qwen2.5-Coder · Unsloth · QLoRA · local embeddings (RAG-style memory) · MCP · PowerShell · Python.
+Kiro · Claude (Opus / Sonnet) · LM Studio · Qwen2.5-Coder · Unsloth · QLoRA · local embeddings (RAG-style memory) · Piper TTS · MCP · PowerShell · Python.
