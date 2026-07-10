@@ -45,3 +45,7 @@ docs/about-alfred.md
 
 # Piper TTS binary + voice models (large; re-fetch with scripts/setup-piper.ps1)
 tools/piper/
+
+
+# Engage drafts (personal, ephemeral review docs - not for the repo)
+memory/engage-drafts/
