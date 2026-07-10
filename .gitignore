@@ -41,3 +41,7 @@ Thumbs.db
 
 # Personal — the Owner's Alfred description (portfolio use, not for the repo)
 docs/about-alfred.md
+
+
+# Piper TTS binary + voice models (large; re-fetch with scripts/setup-piper.ps1)
+tools/piper/

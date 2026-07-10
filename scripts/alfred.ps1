@@ -19,7 +19,8 @@ param(
     [string]$ContextFile,
     [switch]$Chat,
     [switch]$Push,
-    [switch]$ShowStats
+    [switch]$ShowStats,
+    [switch]$Speak
 )
 $ErrorActionPreference = 'Stop'
 
@@ -54,14 +55,24 @@ $__ownerFile = Join-Path $PSScriptRoot '..\secrets\owner.txt'
 if (Test-Path $__ownerFile) { $__owner = (Get-Content $__ownerFile -Raw).Trim(); if ($__owner) { $AlfredSys = $AlfredSys -replace 'the Owner', $__owner } }
 if ($Chat) { & $lms chat $Model -s $AlfredSys; exit $LASTEXITCODE }
 
-# 4) One-off task -> local-coder.ps1
+# 4) One-off task -> local-coder.ps1 (optionally spoken aloud with -Speak)
 if (-not $Task -or $Task.Count -eq 0) {
-    Write-Host 'Usage:  alfred "your task"   |   alfred -Chat   |   alfred -Push "msg"   |   alfred -ContextFile file "task"' -ForegroundColor Yellow
+    Write-Host 'Usage:  alfred "your task"   |   alfred -Chat   |   alfred -Speak "question"   |   alfred -Push "msg"   |   alfred -ContextFile file "task"' -ForegroundColor Yellow
     exit 2
 }
 $prompt = ($Task -join ' ')
 $fwd = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'local-coder.ps1'), '-Model', $Model, $prompt)
 if ($ContextFile) { $fwd += @('-ContextFile', $ContextFile) }
-if ($ShowStats)   { $fwd += '-ShowStats' }
+if ($ShowStats -and -not $Speak) { $fwd += '-ShowStats' }
+
+if ($Speak) {
+    $reply = (& powershell @fwd | Out-String).Trim()
+    $code = $LASTEXITCODE
+    if ($reply) {
+        Write-Output $reply
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'alfred-say.ps1') $reply
+    }
+    exit $code
+}
 & powershell @fwd
 exit $LASTEXITCODE
