@@ -26,8 +26,9 @@ JSONL = ROOT / "memory" / "memory.jsonl"
 
 def connect() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(DB))
+    con = sqlite3.connect(str(DB), timeout=5.0)
     con.execute("PRAGMA journal_mode=WAL;")
+    con.execute("PRAGMA busy_timeout=5000;")
     return con
 
 

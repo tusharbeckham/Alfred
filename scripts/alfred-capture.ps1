@@ -17,17 +17,17 @@
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string[]]$Items)
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $remember = Join-Path $PSScriptRoot 'alfred-remember.ps1'
-$n = 0
+$ok = 0; $fail = 0
 foreach ($it in $Items) {
   $parts = $it -split '\|', 4
-  if ($parts.Count -lt 3) { Write-Warning "Skipping malformed item (need 'type|topic|text[|tags]'): $it"; continue }
+  if ($parts.Count -lt 3) { Write-Warning "Skipping malformed item (need 'type|topic|text[|tags]'): $it"; $fail++; continue }
   $type  = $parts[0].Trim()
   $topic = $parts[1].Trim()
   $text  = $parts[2].Trim()
   $tags  = if ($parts.Count -ge 4 -and $parts[3].Trim()) { $parts[3].Trim() -split '\s*,\s*' } else { @() }
-  & $remember -Type $type -Topic $topic -Text $text -Tags $tags | Out-Null
-  $n++
+  try { & $remember -Type $type -Topic $topic -Text $text -Tags $tags | Out-Null; $ok++ }
+  catch { Write-Warning "capture failed for '$topic': $($_.Exception.Message)"; $fail++ }
 }
-Write-Output ("captured $n memories (memory.jsonl + megamind.db)")
+Write-Output ("captured $ok memories ($fail failed) -> memory.jsonl + megamind.db")
