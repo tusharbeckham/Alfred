@@ -117,6 +117,11 @@ Loop: **Evaluate → Score → Diagnose → Optimize → Regression-test → Acc
 - Owned by `alfred-trainer`; uses `alfred-evaluator` to run and `alfred-prompt-engineer`
   to rewrite. Runs nightly and on demand via `scripts/train.ps1`. A regression suite
   guards against degradation before any improvement is accepted.
+- **Deterministic gate (offline, credit-free):** `scripts/eval-score.py score` grades model
+  responses against machine-checkable `checks` (e.g. `evals/coding-checks.json`) for fast,
+  reproducible pass/fail; `eval-score.py gate` enforces the `rubric.json` acceptance rule
+  (targeted category must improve, no other may regress beyond tolerance) with a hard
+  ACCEPT/REVERT + exit code. `scripts/eval-local.ps1` emits a `.responses.json` sidecar to feed it.
 
 ## Safety Gates (summary — full list in `.kiro/steering/safety.md`)
 

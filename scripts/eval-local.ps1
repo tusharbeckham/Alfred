@@ -39,6 +39,7 @@ if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path
 
 $lc = Join-Path $PSScriptRoot 'local-coder.ps1'
 $lines = @("# Local-model eval - suite: $($data.suite)", "", "Cases: $($cases.Count)  |  generated: $(Get-Date -Format o)", "")
+$responses = [ordered]@{}
 $i = 0
 foreach ($c in $cases) {
   $i++
@@ -47,6 +48,7 @@ foreach ($c in $cases) {
     if ($Recall) { $resp = (& $lc -Recall $c.input -MaxTokens $MaxTokens 2>&1 | Out-String) }
     else         { $resp = (& $lc $c.input -MaxTokens $MaxTokens 2>&1 | Out-String) }
   } catch { $resp = "ERROR: $($_.Exception.Message)" }
+  $responses[$c.id] = $resp.Trim()
   $lines += "## $($c.id) - $($c.category) (weight $($c.weight))"
   $lines += ""
   $lines += "**Input:** $($c.input)"
@@ -60,4 +62,7 @@ foreach ($c in $cases) {
   $lines += ""
 }
 $lines -join "`n" | Set-Content -LiteralPath $OutFile -Encoding UTF8
-Write-Host ("[eval-local] wrote {0} ({1} cases)" -f $OutFile, $cases.Count) -ForegroundColor Green
+$respFile = [IO.Path]::ChangeExtension($OutFile, '.responses.json')
+$responses | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $respFile -Encoding UTF8
+Write-Host ("[eval-local] wrote {0} + {1} ({2} cases)" -f $OutFile, (Split-Path $respFile -Leaf), $cases.Count) -ForegroundColor Green
+Write-Host ("[eval-local] score it:  python scripts/eval-score.py score --suite {0} --checks evals/<suite>-checks.json --responses {1}" -f $Suite, $respFile) -ForegroundColor DarkGray
