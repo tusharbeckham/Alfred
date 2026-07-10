@@ -37,3 +37,7 @@ Thumbs.db
 /data/finetune/
 /evals/results/
 *.gguf
+
+
+# Personal — the Owner's Alfred description (portfolio use, not for the repo)
+docs/about-alfred.md
