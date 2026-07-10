@@ -24,7 +24,8 @@ param(
   [int]$Rate = 1,
   [int]$Volume = 90,
   [string]$ToFile,
-  [switch]$List
+  [switch]$List,
+  [switch]$Test
 )
 $ErrorActionPreference = 'Continue'   # piper.exe logs info to stderr; do not treat that as fatal
 
@@ -47,7 +48,8 @@ if ($List) {
 }
 
 $msg = (@($Text) -join ' ').Trim()
-if (-not $msg) { Write-Error "Nothing to say. Try: alfred-say 'good evening, sir'."; exit 2 }
+if ($Test -and -not $msg) { $msg = "Audio check, sir. If you can hear me clearly, Alfred's voice is routing to this device." }
+if (-not $msg) { Write-Error "Nothing to say. Try: alfred-say 'good evening, sir'  (or: say -Test)."; exit 2 }
 
 if ($Engine -eq 'auto') { $Engine = if (Test-Piper) { 'piper' } else { 'sapi' } }
 
