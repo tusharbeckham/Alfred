@@ -10,13 +10,12 @@
 .PARAMETER Items
   One or more "type|topic|text|tags" strings. type in {decision,learning,fact,preference,outcome,note}.
 .EXAMPLE
-  powershell -NoProfile -File scripts/alfred-capture.ps1 -Items @(
-    "decision|solar tests|Modernized the solar-forecast suite to 20 tests covering POA + forecast API|solar,tests",
+  powershell -NoProfile -File scripts/alfred-capture.ps1 `
+    "decision|solar tests|Modernized the solar-forecast suite to 20 tests|solar,tests" `
     "preference|tone|Owner values honest verification over hype|owner,style"
-  )
 #>
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string[]]$Items)
+param([Parameter(Mandatory=$true, ValueFromRemainingArguments=$true)][string[]]$Items)
 $ErrorActionPreference = 'Continue'
 $remember = Join-Path $PSScriptRoot 'alfred-remember.ps1'
 $ok = 0; $fail = 0

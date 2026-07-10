@@ -20,10 +20,9 @@ Embeds via the local nomic model so it's recallable offline. Never store secrets
 ## Session capture (batch) — the practical "capture the conversation" step
 At the end of a meaningful session, save several points at once (deliberate, not a silent hook):
 ```
-powershell -NoProfile -File scripts/alfred-capture.ps1 -Items @(
-  "decision|<topic>|<what + why>|tag1,tag2",
+powershell -NoProfile -File scripts/alfred-capture.ps1 `
+  "decision|<topic>|<what + why>|tag1,tag2" `
   "preference|<topic>|<owner trait>|owner"
-)
 ```
 Each item is written to `memory.jsonl` (with an embedding) AND the SQLite megamind (`megamind.db`).
 
