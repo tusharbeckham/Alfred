@@ -44,4 +44,10 @@ $entry = [ordered]@{
 $dir = Split-Path $Store
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 ($entry | ConvertTo-Json -Depth 6 -Compress) | Add-Content -LiteralPath $Store -Encoding UTF8
-Write-Output ("remembered [{0}] {1}  (embedding dims={2})" -f $Type, $Topic, $emb.Count)
+
+# Dual-write to the fast local SQLite megamind (best-effort) so FTS recall stays in sync, offline.
+try {
+  python "$PSScriptRoot\megamind.py" add -T $Type -o $Topic -x $Text -g (@($Tags) -join ',') 2>&1 | Out-Null
+} catch { Write-Warning "megamind.db sync skipped ($($_.Exception.Message))." }
+
+Write-Output ("remembered [{0}] {1}  (embedding dims={2}; synced to megamind.db)" -f $Type, $Topic, $emb.Count)

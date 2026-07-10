@@ -1,0 +1,33 @@
+{
+  "name": "alfred-finance",
+  "description": "Alfred's finance analyst. Budgeting, unit economics, pricing math, valuations/scenarios, and markets education - strictly education and analysis, never financial/investment/tax advice, never executes trades or operates accounts.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-finance/identity.txt",
+  "tools": ["read", "write", "shell", "grep", "glob", "code", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**", "**/*.key", "**/*.pem", "C:/Alfred/.kiro/agents/**"]
+    },
+    "shell": {
+      "autoAllowReadonly": true,
+      "deniedCommands": ["rm\\s+-rf", "format\\s", "reg\\s+(add|delete)", "Remove-Item.*-Recurse", "git\\s+push.*(main|master)", "git\\s+push\\s+--force", "git\\s+reset\\s+--hard", "shutdown", "Stop-Computer"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "postToolUse": [
+      { "matcher": "shell", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/post-shell.ps1", "timeout_ms": 10000 }
+    ]
+  }
+}

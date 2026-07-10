@@ -21,6 +21,8 @@ Embeds via the local nomic model so it's recallable offline. Never store secrets
 - **Offline / local:** `powershell -NoProfile -File scripts/alfred-recall.ps1 -Query "<task or question>" -TopK 4`
   (semantic search; keyword fallback if LM Studio is down). The local coder auto-injects memory with
   `scripts/local-coder.ps1 -Recall "<task>"`.
+- **Fast path (SQLite FTS):** `python scripts/megamind.py recall -q "<task>" -k 5` — sub-millisecond
+  indexed recall from the local megamind DB (`memory/megamind.db`), kept in sync by `alfred-remember.ps1`.
 - **With Kiro:** query the memory knowledge base, or read `memory/*.md`.
 
 ## Learn (consolidate)

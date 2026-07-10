@@ -24,7 +24,7 @@ optimization**, never model-weight training.
 4. **Leave a trail.** Log decisions and learnings to `memory/`.
 5. **Improve continuously.** Feed outcomes into the Training System.
 
-## Org Chart (Alfred overseer + 19 core agents + local-coder)
+## Org Chart (Alfred overseer + 21 core agents + local-coder)
 
 ### Overseer — Alfred (above all tiers)
 - **alfred** (opus 4.8, ultrathink) — The supreme overseer, ABOVE the manager and leader. The Owner's
@@ -59,6 +59,8 @@ optimization**, never model-weight training.
 - **alfred-physics** — physics: mechanics/E&M/quantum/thermo, PINNs, simulation; generates verified fine-tune data.
 - **alfred-backend** — backend engineering: APIs, data modeling, auth, caching, queues, services, IaC, observability.
 - **alfred-ml** — ML engineering: data/training pipelines, evaluation, MLOps, LoRA/QLoRA fine-tuning; owns the local-model fine-tune workflow.
+- **alfred-business** — business strategy: market/competitor research, go-to-market, pricing, business plans, freelancing/proposals. Education + drafting only; never legal/financial advice, never operates the Owner's accounts.
+- **alfred-finance** — financial analysis: budgeting, unit economics, pricing math, valuations/scenarios, markets education. Education only; not financial/investment/tax advice; never executes trades.
 
 ### Tier 3 — Meta-Agents (agents that manage agents)
 - **alfred-evaluator** (opus 4.6+) — runs the training evals.
@@ -98,7 +100,7 @@ Every agent has a 6-layer cognition stack in `.kiro/brains/<agent>/`:
 2. **Reasoning Engine** — effort level; ultrathink (`/effort max`) for manager, leader, architect.
 3. **Instincts** — steering files (always-on rules).
 4. **Knowledge** — skills (`skill://`, loaded on demand).
-5. **Memory** — knowledge base + `memory/` files (persistent).
+5. **Memory** — a local **SQLite FTS megamind** (`memory/megamind.db`, fast offline recall) + `memory/` files + knowledge base (persistent).
 6. **Reflexes** — hooks (automatic lifecycle reactions).
 
 Brain folder contents: `brain.md` (how the agent thinks/decides/escalates),
