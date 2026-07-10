@@ -11,7 +11,11 @@
 .EXAMPLE  talk
 #>
 [CmdletBinding()]
-param([int]$MaxTokens = 160, [string]$Voice)
+param(
+  [Parameter(ValueFromRemainingArguments=$true)][string[]]$Question,
+  [int]$MaxTokens = 160,
+  [string]$Voice
+)
 $ErrorActionPreference = 'Continue'
 $say = Join-Path $PSScriptRoot 'alfred-say.ps1'
 $lc  = Join-Path $PSScriptRoot 'local-coder.ps1'
@@ -27,6 +31,17 @@ function Speak($text) {
 }
 
 Write-Host "Alfred voice chat - type a message, or 'exit' to leave." -ForegroundColor Cyan
+
+# One-shot mode: a question was passed (e.g. `ask "how do I list files?"`) - answer once + speak, then exit.
+if ($Question -and ($Question -join '').Trim()) {
+  $q = ($Question -join ' ').Trim()
+  Write-Host "Alfred is thinking..." -ForegroundColor DarkGray
+  $reply = (& powershell -NoProfile -ExecutionPolicy Bypass -File $lc -System $sys -MaxTokens $MaxTokens $q 2>&1 | Out-String).Trim()
+  if ($reply) { Write-Host ("Alfred: " + $reply) -ForegroundColor Green; Speak $reply }
+  else { Write-Host "Alfred: (no reply - is the local model up?)" -ForegroundColor Yellow }
+  return
+}
+
 Speak "Good evening, sir. I'm listening."
 
 while ($true) {
