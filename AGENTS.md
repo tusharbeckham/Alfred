@@ -97,7 +97,8 @@ of Opus 4.8 / 4.6.
 Every agent has a 6-layer cognition stack in `.kiro/brains/<agent>/`:
 
 1. **Identity Core** — the system prompt (`identity.txt`).
-2. **Reasoning Engine** — effort level; ultrathink (`/effort max`) for manager, leader, architect.
+2. **Reasoning Engine** — effort scaled to stakes; a global *think-first + reflect-before-answer*
+   discipline (`.kiro/steering/reasoning.md`); ultrathink (`/effort max`) for manager, leader, architect.
 3. **Instincts** — steering files (always-on rules).
 4. **Knowledge** — skills (`skill://`, loaded on demand).
 5. **Memory** — a local **SQLite FTS megamind** (`memory/megamind.db`, fast offline recall) + `memory/` files + knowledge base (persistent).
