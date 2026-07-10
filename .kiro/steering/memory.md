@@ -17,6 +17,16 @@ powershell -NoProfile -File scripts/alfred-remember.ps1 -Type <decision|learning
 ```
 Embeds via the local nomic model so it's recallable offline. Never store secrets.
 
+## Session capture (batch) — the practical "capture the conversation" step
+At the end of a meaningful session, save several points at once (deliberate, not a silent hook):
+```
+powershell -NoProfile -File scripts/alfred-capture.ps1 -Items @(
+  "decision|<topic>|<what + why>|tag1,tag2",
+  "preference|<topic>|<owner trait>|owner"
+)
+```
+Each item is written to `memory.jsonl` (with an embedding) AND the SQLite megamind (`megamind.db`).
+
 ## Recall (remember relevant context) — do this before acting on a task
 - **Offline / local:** `powershell -NoProfile -File scripts/alfred-recall.ps1 -Query "<task or question>" -TopK 4`
   (semantic search; keyword fallback if LM Studio is down). The local coder auto-injects memory with
