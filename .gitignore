@@ -62,3 +62,7 @@ __pycache__/
 
 # Keep the key-free deploy env TEMPLATE tracked (the real .env stays ignored above)
 !deploy/.env.example
+
+
+# Local HF Space upload staging (copies of deploy files; not source of truth)
+deploy/hf-space/
