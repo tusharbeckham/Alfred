@@ -47,21 +47,88 @@ function guard(ip, message) {
   return { ok: true, msg };
 }
 
+// --- session id (cookie) for KV conversation memory ---
+function getSid(request) {
+  const c = request.headers.get("Cookie") || "";
+  const m = c.match(/alfred_sid=([A-Za-z0-9]+)/);
+  return m ? m[1] : null;
+}
+function newSid() { return crypto.randomUUID().replace(/-/g, ""); }
+
+// --- RAG: embed the query and pull the most relevant stored facts (Cloudflare Vectorize + Workers AI) ---
+const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5"; // 768-dim
+async function ragContext(env, query) {
+  if (!env.VEC || !env.AI) return "";
+  try {
+    const e = await env.AI.run(EMBED_MODEL, { text: [query] });
+    const vec = e && e.data && e.data[0];
+    if (!vec) return "";
+    const res = await env.VEC.query(vec, { topK: 4, returnMetadata: true });
+    const facts = (res.matches || []).filter((m) => m.score > 0.5 && m.metadata && m.metadata.text).map((m) => "- " + m.metadata.text);
+    return facts.length ? ("\n\nRELEVANT KNOWLEDGE (things you, Alfred, know — use them to answer accurately):\n" + facts.join("\n")) : "";
+  } catch (e) { return ""; }
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const TXT = { "content-type": "text/plain; charset=utf-8" };
+
     if (request.method === "GET" && url.pathname === "/") {
       return new Response(HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
+
+    // per-visitor session id (cookie) for KV memory
+    let sid = getSid(request);
+    let setCookie = null;
+    if (!sid) { sid = newSid(); setCookie = "alfred_sid=" + sid + "; Path=/; Max-Age=2592000; SameSite=Lax; Secure; HttpOnly"; }
+
+    // GET /api/history -> restore this visitor's saved conversation
+    if (request.method === "GET" && url.pathname === "/api/history") {
+      let hist = [];
+      if (env.MEMORY) { try { hist = (await env.MEMORY.get("sess:" + sid, "json")) || []; } catch (e) {} }
+      const h = { "content-type": "application/json" }; if (setCookie) h["set-cookie"] = setCookie;
+      return new Response(JSON.stringify({ history: hist }), { headers: h });
+    }
+
+    // POST /api/learn -> teach Alfred facts (RAG knowledge base). Protected by ADMIN_KEY.
+    if (request.method === "POST" && url.pathname === "/api/learn") {
+      if (!env.ADMIN_KEY || request.headers.get("x-admin-key") !== env.ADMIN_KEY) return new Response("unauthorized", { status: 401, headers: TXT });
+      if (!env.VEC || !env.AI) return new Response("knowledge base not configured (need AI + VEC bindings).", { headers: TXT });
+      let b; try { b = await request.json(); } catch { b = {}; }
+      const facts = Array.isArray(b.facts) ? b.facts : (b.text ? [b.text] : []);
+      if (!facts.length) return new Response("send JSON {\"facts\":[\"...\"]} or {\"text\":\"...\"}.", { headers: TXT });
+      try {
+        const vectors = [];
+        for (const f of facts.slice(0, 100)) {
+          const t = String(f).trim().slice(0, 1000); if (!t) continue;
+          const e = await env.AI.run(EMBED_MODEL, { text: [t] });
+          vectors.push({ id: newSid(), values: e.data[0], metadata: { text: t } });
+        }
+        await env.VEC.upsert(vectors);
+        return new Response("learned " + vectors.length + " fact(s).", { headers: TXT });
+      } catch (e) { return new Response("learn failed: " + (e && e.message ? e.message : String(e)), { headers: TXT }); }
+    }
+
     if (request.method === "POST" && url.pathname === "/api/chat") {
       const ip = request.headers.get("CF-Connecting-IP") || "anon";
       let body; try { body = await request.json(); } catch { body = {}; }
       const g = guard(ip, body.message);
-      const TXT = { "content-type": "text/plain; charset=utf-8" };
-      if (!g.ok) return new Response(HOLD[g.reason] || HOLD.error, { headers: TXT });
+      if (!g.ok) { const h = { ...TXT }; if (setCookie) h["set-cookie"] = setCookie; return new Response(HOLD[g.reason] || HOLD.error, { headers: h }); }
       const history = Array.isArray(body.history) ? body.history.slice(-8) : [];
-      const messages = [{ role: "system", content: PERSONA }, ...history, { role: "user", content: g.msg }];
+
+      // RAG: pull relevant known facts into the system prompt
+      const knowledge = await ragContext(env, g.msg);
+      const messages = [{ role: "system", content: PERSONA + knowledge }, ...history, { role: "user", content: g.msg }];
+
+      // KV: persist the conversation (through this user turn) for cross-reload memory
+      if (env.MEMORY) {
+        const toStore = [...history, { role: "user", content: g.msg }].slice(-20);
+        ctx.waitUntil(env.MEMORY.put("sess:" + sid, JSON.stringify(toStore), { expirationTtl: 2592000 }).catch(() => {}));
+      }
+
       const SSE = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" };
+      if (setCookie) SSE["set-cookie"] = setCookie;
       try {
         // Prefer Groq (sharper/faster) when a key is set; else Cloudflare Workers AI (free, no key).
         if (env.GROQ_API_KEY) {
@@ -192,4 +259,5 @@ async function stream(out){
   done();
 }
 function done(){busy=false;send.disabled=false;input.focus();main.scrollTop=main.scrollHeight;}
+(function(){fetch('/api/history').then(function(r){return r.json();}).then(function(d){if(d&&d.history&&d.history.length){if(hero)hero.style.display='none';for(var n=0;n<d.history.length;n++){var m=d.history[n];if(m&&m.role==='user'){row('you','You').textContent=m.content;}else if(m){render(row('alfred','Alfred'),m.content);}if(m)hist.push(m);}main.scrollTop=main.scrollHeight;}}).catch(function(){});})();
 </script></body></html>`;

@@ -6,6 +6,17 @@ compatibility_date = "2024-11-01"
 [ai]
 binding = "AI"
 
+# Conversation memory (KV). Create: npx wrangler kv namespace create MEMORY
+# [[kv_namespaces]]
+# binding = "MEMORY"
+# id = "PASTE_THE_ID_WRANGLER_PRINTS"
+
+# RAG knowledge base (Vectorize). Create:
+#   npx wrangler vectorize create alfred-kb --dimensions=768 --metric=cosine
+# [[vectorize]]
+# binding = "VEC"
+# index_name = "alfred-kb"
+
 # Secrets (set these, don't put keys here):
 #   npx wrangler secret put GROQ_API_KEY
 # Optional var:
