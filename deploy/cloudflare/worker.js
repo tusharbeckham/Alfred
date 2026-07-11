@@ -87,6 +87,7 @@ export default {
 
 const HTML = `<!doctype html>
 <html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script>(function(){try{var t=localStorage.getItem('alfred-theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <title>Alfred</title>
 <meta name="description" content="Alfred — a sharp, witty AI assistant. Ask him anything.">
 <meta property="og:title" content="Alfred">
