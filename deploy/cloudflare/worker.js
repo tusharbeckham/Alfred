@@ -57,17 +57,26 @@ export default {
       let body; try { body = await request.json(); } catch { body = {}; }
       const g = guard(ip, body.message);
       if (!g.ok) return new Response(HOLD[g.reason] || HOLD.error, { headers: { "content-type": "text/plain; charset=utf-8" } });
-      if (!env.GROQ_API_KEY) return new Response("Alfred isn't wired to a model yet (missing GROQ_API_KEY secret).", { headers: { "content-type": "text/plain; charset=utf-8" } });
       const history = Array.isArray(body.history) ? body.history.slice(-6) : [];
       const messages = [{ role: "system", content: PERSONA }, ...history, { role: "user", content: g.msg }];
+      const SSE = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" };
       try {
-        const gr = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: { authorization: "Bearer " + env.GROQ_API_KEY, "content-type": "application/json" },
-          body: JSON.stringify({ model: env.LLM_MODEL || "llama-3.3-70b-versatile", messages, temperature: 0.6, max_tokens: 400, stream: true }),
-        });
-        if (!gr.ok || !gr.body) return new Response(HOLD.error, { headers: { "content-type": "text/plain; charset=utf-8" } });
-        return new Response(gr.body, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+        // Prefer Cloudflare Workers AI (free, no external key); fall back to Groq if a key is set.
+        if (env.AI) {
+          const model = env.LLM_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+          const stream = await env.AI.run(model, { messages, stream: true, max_tokens: 400 });
+          return new Response(stream, { headers: SSE });
+        }
+        if (env.GROQ_API_KEY) {
+          const gr = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: { authorization: "Bearer " + env.GROQ_API_KEY, "content-type": "application/json" },
+            body: JSON.stringify({ model: env.LLM_MODEL || "llama-3.3-70b-versatile", messages, temperature: 0.6, max_tokens: 400, stream: true }),
+          });
+          if (!gr.ok || !gr.body) return new Response(HOLD.error, { headers: { "content-type": "text/plain; charset=utf-8" } });
+          return new Response(gr.body, { headers: SSE });
+        }
+        return new Response("Alfred isn't wired to a model yet - add the Workers AI binding (name it AI), or set a GROQ_API_KEY secret.", { headers: { "content-type": "text/plain; charset=utf-8" } });
       } catch (e) { return new Response(HOLD.error, { headers: { "content-type": "text/plain; charset=utf-8" } }); }
     }
     return new Response("Not found", { status: 404 });
@@ -115,7 +124,7 @@ async function send(){
       for(var k=0;k<lines.length;k++){
         var s=lines[k].trim();if(s.indexOf('data:')!==0)continue;
         var data=s.slice(5).trim();if(data==='[DONE]')continue;
-        try{var j=JSON.parse(data);var dl=(j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content)||'';if(dl){acc+=dl;out.textContent=acc;log.scrollTop=log.scrollHeight;}}catch(e){}
+        try{var j=JSON.parse(data);var dl=j.response||(j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content)||'';if(dl){acc+=dl;out.textContent=acc;log.scrollTop=log.scrollHeight;}}catch(e){}
       }
     }
     if(!acc)out.textContent='(silence — try again)';

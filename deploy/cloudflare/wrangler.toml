@@ -2,6 +2,10 @@ name = "alfred"
 main = "worker.js"
 compatibility_date = "2024-11-01"
 
+# Cloudflare Workers AI — free, no external key. Add this binding to the Worker.
+[ai]
+binding = "AI"
+
 # Secrets (set these, don't put keys here):
 #   npx wrangler secret put GROQ_API_KEY
 # Optional var:
