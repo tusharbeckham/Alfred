@@ -77,7 +77,7 @@ export default {
           return new Response(gr.body, { headers: SSE });
         }
         return new Response("Alfred isn't wired to a model yet - add the Workers AI binding (name it AI), or set a GROQ_API_KEY secret.", { headers: { "content-type": "text/plain; charset=utf-8" } });
-      } catch (e) { return new Response(HOLD.error, { headers: { "content-type": "text/plain; charset=utf-8" } }); }
+      } catch (e) { return new Response("Alfred hit a snag: " + (e && e.message ? e.message : String(e)), { headers: { "content-type": "text/plain; charset=utf-8" } }); }
     }
     return new Response("Not found", { status: 404 });
   },
