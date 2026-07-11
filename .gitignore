@@ -54,3 +54,11 @@ memory/engage-drafts/
 # Public-deploy local secrets / config (never commit real keys)
 deploy/.env
 deploy/blocklist.txt
+
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Keep the key-free deploy env TEMPLATE tracked (the real .env stays ignored above)
+!deploy/.env.example
