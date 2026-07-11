@@ -88,6 +88,14 @@ export default {
 const HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Alfred</title>
+<meta name="description" content="Alfred — a sharp, witty AI assistant. Ask him anything.">
+<meta property="og:title" content="Alfred">
+<meta property="og:description" content="A sharp, witty AI assistant. Ask him anything.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d97757'/%3E%3Ctext x='16' y='23' font-size='20' font-family='Georgia,serif' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <style>
 :root{--bg:#faf9f5;--panel:#fff;--text:#1f1e1c;--muted:#73716b;--user:#ece9e1;--line:#e7e3d9;--accent:#d97757;}
 *{box-sizing:border-box}html,body{height:100%}
@@ -106,7 +114,16 @@ header{position:sticky;top:0;padding:16px 24px;font-size:20px;font-weight:600;le
 .you{align-items:flex-end}.you .who{color:#b9977f}
 .you .b{background:var(--user);padding:11px 15px;border-radius:16px 16px 5px 16px;max-width:90%}
 .alfred .b{line-height:1.62;max-width:100%}
-.b{white-space:pre-wrap;font-size:15.5px}
+.b{font-size:15.5px}
+.you .b{white-space:pre-wrap}
+.alfred .b p{margin:0 0 11px}.alfred .b p:last-child{margin:0}
+.alfred .b ul,.alfred .b ol{margin:6px 0;padding-left:22px}.alfred .b li{margin:3px 0}
+.alfred .b h1,.alfred .b h2,.alfred .b h3{font-size:16.5px;font-weight:650;margin:14px 0 6px}
+.alfred .b code{background:#efece3;padding:1.5px 6px;border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13.5px}
+.alfred .b pre{background:#2f2b26;color:#f5f2ea;padding:13px 15px;border-radius:11px;overflow-x:auto;margin:10px 0}
+.alfred .b pre code{background:none;padding:0;color:inherit;font-size:13px;line-height:1.5}
+.alfred .b a{color:var(--accent)}
+.alfred .b blockquote{margin:8px 0;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}
 .dots span{display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite}
 .dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,60%,100%{opacity:.2}30%{opacity:.85}}
@@ -149,16 +166,17 @@ async function stream(out){
   try{
     var res=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:hist[hist.length-1].content,history:hist.slice(0,-1)})});
     var ct=res.headers.get('content-type')||'';
-    if(ct.indexOf('event-stream')<0){var t=await res.text();out.textContent=t;hist.push({role:'assistant',content:t});return done();}
+    if(ct.indexOf('event-stream')<0){var t=await res.text();render(out,t);hist.push({role:'assistant',content:t});return done();}
     var reader=res.body.getReader(),dec=new TextDecoder(),acc='',buf='';out.textContent='';
     while(true){var rd=await reader.read();if(rd.done)break;buf+=dec.decode(rd.value,{stream:true});
       var lines=buf.split('\\n');buf=lines.pop();
       for(var k=0;k<lines.length;k++){var s=lines[k].trim();if(s.indexOf('data:')!==0)continue;var data=s.slice(5).trim();if(data==='[DONE]')continue;
-        try{var j=JSON.parse(data);var dl=j.response||(j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content)||'';if(dl){acc+=dl;out.textContent=acc;main.scrollTop=main.scrollHeight;}}catch(e){}}}
+        try{var j=JSON.parse(data);var dl=j.response||(j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content)||'';if(dl){acc+=dl;render(out,acc);main.scrollTop=main.scrollHeight;}}catch(e){}}}
     if(!acc)out.textContent='(silence — try again)';
     hist.push({role:'assistant',content:acc});
   }catch(e){out.textContent='That tripped a wire. Try again.';}
   done();
 }
+function render(el,txt){if(window.marked&&window.DOMPurify){try{el.innerHTML=DOMPurify.sanitize(marked.parse(txt||''));return;}catch(e){}}el.textContent=txt||'';}
 function done(){busy=false;send.disabled=false;input.focus();main.scrollTop=main.scrollHeight;}
 </script></body></html>`;
