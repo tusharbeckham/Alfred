@@ -118,7 +118,11 @@ def main():
         theme="soft",
     )
     demo.queue(default_concurrency_limit=int(os.getenv("MAX_CONCURRENCY", "32")))
-    demo.launch(server_name="0.0.0.0", server_port=int(os.getenv("PORT", "7860")))
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.getenv("PORT", "7860")),
+        share=os.getenv("SHARE", "0") == "1",   # SHARE=1 -> free temporary public *.gradio.live link
+    )
 
 if __name__ == "__main__":
     main()
