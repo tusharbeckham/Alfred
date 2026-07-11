@@ -49,3 +49,8 @@ tools/piper/
 
 # Engage drafts (personal, ephemeral review docs - not for the repo)
 memory/engage-drafts/
+
+
+# Public-deploy local secrets / config (never commit real keys)
+deploy/.env
+deploy/blocklist.txt
