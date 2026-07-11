@@ -9,9 +9,10 @@ Free tier: plenty for a personal bot, and it doesn't sleep.
 2. **Edit code** → select-all, delete → paste ALL of `worker.js` → **Deploy**.
 3. **Settings → Bindings → Add → Workers AI** → variable name **`AI`** → save & deploy.
    *(This binding is what lets the Worker run the model for free — it's the only required step.)*
-4. *(Optional, for more brains)* **Settings → Variables** → add `LLM_MODEL`. Default is
-   `@cf/meta/llama-3.1-8b-instruct` (fast, reliable); try `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
-   for a smarter model (confirm it's on the Workers AI model list first).
+4. *(Optional)* **Settings → Variables** → add `LLM_MODEL` to change the model. Default is
+   `@cf/meta/llama-4-scout-17b-16e-instruct` (current, smart, multimodal). If Cloudflare ever deprecates
+   it (you'll see a "5028 deprecated" message), open **AI → Models** in the dashboard and set `LLM_MODEL`
+   to any current text-generation model id.
 5. Open `https://alfred.<your-subdomain>.workers.dev` — that's your public Alfred. Share it.
 
 ## Alternative backend: Groq (also free)

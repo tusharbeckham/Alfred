@@ -63,7 +63,7 @@ export default {
       try {
         // Prefer Cloudflare Workers AI (free, no external key); fall back to Groq if a key is set.
         if (env.AI) {
-          const model = env.LLM_MODEL || "@cf/meta/llama-3.1-8b-instruct";
+          const model = env.LLM_MODEL || "@cf/meta/llama-4-scout-17b-16e-instruct";
           const stream = await env.AI.run(model, { messages, stream: true, max_tokens: 400 });
           return new Response(stream, { headers: SSE });
         }
