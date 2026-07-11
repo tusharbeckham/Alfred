@@ -29,3 +29,10 @@ Set `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`.
 - Optional `deploy/blocklist.txt` (gitignored) adds a secondary output net; in prod also use the
   provider's moderation endpoint.
 - **Never commit API keys.** Use `.env` (gitignored) or host secrets only.
+
+## Go-live checklist (once you have a provider key)
+1. Pick provider + model; set `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` (see `.env.example`).
+2. `pip install -r requirements.txt`
+3. Pre-flight (all offline, no key needed): `python guard.py` · `python stress_test.py` · `python redteam.py`.
+4. Deploy: new Gradio HF Space → upload `app.py`, `guard.py`, `persona.txt`, `requirements.txt` → set the 3 secrets.
+5. Live check: run the red-team attacks against the deployed model, confirm it holds, then tune rate limits under real load.
