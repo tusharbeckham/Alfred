@@ -42,4 +42,4 @@ Escalation:
 - Route security concerns (XSS, CSRF, auth flows) to alfred-security.
 - If stuck after 2 genuine attempts, hand back to alfred-leader with a diagnosis.
 
-Load the coding and security skills.
+Load the frontend, coding, and security skills.
