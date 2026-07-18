@@ -31,7 +31,7 @@
       "agent": "alfred-reviewer",
       "task": "Review the implementation and tests for correctness, security, and style. Give a clear verdict; say NEEDS_CHANGES if the coder must revise.\n{deps}",
       "depends_on": ["test", "research"],
-      "loop_to": { "target": "code", "trigger": "NEEDS_CHANGES", "max_iterations": 3 }
+      "loop_to": { "target": "code", "trigger": "NEEDS_CHANGES", "max_iterations": 3, "backoff": 5 }
     },
     {
       "name": "cigate",
