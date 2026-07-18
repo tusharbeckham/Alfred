@@ -1,0 +1,43 @@
+{
+  "name": "feature",
+  "description": "Ship a feature: plan, then build+research in parallel, test, review, CI gate.",
+  "stages": [
+    {
+      "name": "plan",
+      "agent": "alfred-planner",
+      "task": "Break this objective into an ordered, testable implementation plan with dependencies and a definition of done for each step:\n\n{task}",
+      "depends_on": []
+    },
+    {
+      "name": "code",
+      "agent": "alfred-coder",
+      "task": "Implement the following plan. Match the project's existing style, add tests, and verify the build.\n\n{stage.plan}",
+      "depends_on": ["plan"]
+    },
+    {
+      "name": "research",
+      "agent": "alfred-researcher",
+      "task": "Research anything the implementation needs (APIs, library versions, best practices, gotchas) for this objective. Cite sources.\n\n{task}",
+      "depends_on": ["plan"]
+    },
+    {
+      "name": "test",
+      "agent": "alfred-tester",
+      "task": "Write and run tests for the implementation. Report pass/fail with evidence.\n{deps}",
+      "depends_on": ["code"]
+    },
+    {
+      "name": "review",
+      "agent": "alfred-reviewer",
+      "task": "Review the implementation and tests for correctness, security, and style. Give a clear verdict; say NEEDS_CHANGES if the coder must revise.\n{deps}",
+      "depends_on": ["test", "research"],
+      "loop_to": { "target": "code", "trigger": "NEEDS_CHANGES", "max_iterations": 3 }
+    },
+    {
+      "name": "cigate",
+      "agent": "alfred-devops",
+      "task": "Run the CI gate (lint/build/test). Report the verdict as the last line: 'CI: PASS' or 'CI: FAIL'.\n{stage.review}",
+      "depends_on": ["review"]
+    }
+  ]
+}

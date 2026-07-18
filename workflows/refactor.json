@@ -1,0 +1,31 @@
+{
+  "name": "refactor",
+  "description": "Safe refactor: lock behavior with tests, refactor, then verify no behavior changed.",
+  "stages": [
+    {
+      "name": "baseline",
+      "agent": "alfred-tester",
+      "task": "Before any change, add characterization tests that capture the CURRENT behavior of the code in scope, and run them green. Report coverage of the behavior to be preserved.\n\n{task}",
+      "depends_on": []
+    },
+    {
+      "name": "refactor",
+      "agent": "alfred-coder",
+      "task": "Refactor the code in scope for clarity/structure WITHOUT changing behavior. The characterization tests below must keep passing.\n{stage.baseline}",
+      "depends_on": ["baseline"]
+    },
+    {
+      "name": "verify",
+      "agent": "alfred-tester",
+      "task": "Re-run the full test suite including the characterization tests. If any behavior changed, say NEEDS_CHANGES with details.\n{deps}",
+      "depends_on": ["refactor"],
+      "loop_to": { "target": "refactor", "trigger": "NEEDS_CHANGES", "max_iterations": 3 }
+    },
+    {
+      "name": "diffreview",
+      "agent": "alfred-reviewer",
+      "task": "Review the refactor diff: confirm behavior is preserved, the structure is genuinely improved, and no scope crept in.\n{deps}",
+      "depends_on": ["verify"]
+    }
+  ]
+}

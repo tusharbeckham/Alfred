@@ -1,0 +1,36 @@
+{
+  "name": "research",
+  "description": "Fan-out: parallel research tracks that fan into one synthesis.",
+  "stages": [
+    {
+      "name": "frame",
+      "agent": "alfred-planner",
+      "task": "Turn this research objective into 3 distinct, non-overlapping sub-questions (state-of-the-art, tradeoffs/alternatives, and practical adoption/cost). Output them as a short list.\n\n{task}",
+      "depends_on": []
+    },
+    {
+      "name": "track_a",
+      "agent": "alfred-researcher",
+      "task": "Research sub-question #1 (state-of-the-art). Gather sources, summarize findings with confidence levels, and cite every claim.\n{stage.frame}",
+      "depends_on": ["frame"]
+    },
+    {
+      "name": "track_b",
+      "agent": "alfred-researcher",
+      "task": "Research sub-question #2 (tradeoffs and alternatives). Gather sources, compare options, cite every claim.\n{stage.frame}",
+      "depends_on": ["frame"]
+    },
+    {
+      "name": "track_c",
+      "agent": "alfred-researcher",
+      "task": "Research sub-question #3 (practical adoption, cost, and risks). Gather sources, cite every claim.\n{stage.frame}",
+      "depends_on": ["frame"]
+    },
+    {
+      "name": "synthesize",
+      "agent": "alfred-researcher",
+      "task": "Synthesize the three research tracks into one coherent brief with a clear recommendation and a sources list. Flag disagreements between tracks.\n{deps}",
+      "depends_on": ["track_a", "track_b", "track_c"]
+    }
+  ]
+}

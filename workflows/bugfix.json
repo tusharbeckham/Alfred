@@ -1,0 +1,31 @@
+{
+  "name": "bugfix",
+  "description": "Diagnose, fix, and verify a bug with an iterate-until-green loop.",
+  "stages": [
+    {
+      "name": "diagnose",
+      "agent": "alfred-debugger",
+      "task": "Reproduce and root-cause this bug. Produce a minimal failing case and a diagnosis (not just symptoms):\n\n{task}",
+      "depends_on": []
+    },
+    {
+      "name": "fix",
+      "agent": "alfred-coder",
+      "task": "Fix the root cause identified below. Keep the change minimal and targeted; do not refactor unrelated code.\n{stage.diagnose}",
+      "depends_on": ["diagnose"]
+    },
+    {
+      "name": "verify",
+      "agent": "alfred-tester",
+      "task": "Run the failing case plus the regression suite. If anything still fails, say NEEDS_CHANGES and explain what failed.\n{deps}",
+      "depends_on": ["fix"],
+      "loop_to": { "target": "fix", "trigger": "NEEDS_CHANGES", "max_iterations": 4 }
+    },
+    {
+      "name": "review",
+      "agent": "alfred-reviewer",
+      "task": "Confirm the fix addresses the root cause, adds a regression test, and introduces no new risk.\n{deps}",
+      "depends_on": ["verify"]
+    }
+  ]
+}
