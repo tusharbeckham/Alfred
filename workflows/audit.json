@@ -1,0 +1,24 @@
+{
+  "name": "audit",
+  "description": "Parallel security + code review, integrated into one consolidated report.",
+  "stages": [
+    {
+      "name": "security",
+      "agent": "alfred-security",
+      "task": "Threat-model and security-review the target. Return severity-ranked findings (Critical/High/Medium/Low) with file:line evidence and remediation.\n\n{task}",
+      "depends_on": []
+    },
+    {
+      "name": "review",
+      "agent": "alfred-reviewer",
+      "task": "Review the target for correctness, maintainability, and style. Return findings with file:line citations and a verdict.\n\n{task}",
+      "depends_on": []
+    },
+    {
+      "name": "report",
+      "agent": "alfred-architect",
+      "task": "Consolidate the security and code-review findings into one prioritized report: top risks first, quick wins, and a recommended remediation order. Do not invent findings not present below.\n{deps}",
+      "depends_on": ["security", "review"]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "alfred-frontend",
+  "description": "Alfred's frontend engineer. Accessible, performant UI (HTML/CSS/JS/TS and component frameworks), design systems, and client state; ships with tests and accessibility by default.",
+  "model": "claude-opus-4.6",
+  "prompt": "file:///C:/Alfred/.kiro/brains/alfred-frontend/identity.txt",
+  "tools": ["read", "write", "shell", "grep", "glob", "code", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["C:/Alfred/**"],
+      "deniedPaths": ["C:/Windows/**", "**/.env", "**/secrets/**", "**/*.key", "**/*.pem", "C:/Alfred/.kiro/agents/**"]
+    },
+    "shell": {
+      "autoAllowReadonly": true,
+      "deniedCommands": ["rm\\s+-rf", "format\\s", "reg\\s+(add|delete)", "Remove-Item.*-Recurse", "git\\s+push.*(main|master)", "git\\s+push\\s+--force", "git\\s+reset\\s+--hard", "git\\s+clean\\s+-", "shutdown", "Stop-Computer"]
+    }
+  },
+  "resources": [
+    {
+      "type": "knowledgeBase",
+      "source": "file:///C:/Alfred/memory",
+      "name": "alfred-shared-memory",
+      "indexType": "best",
+      "include": ["**/*.md"],
+      "autoUpdate": true
+    }
+  ],
+  "hooks": {
+    "preToolUse": [
+      { "matcher": "write", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/pre-write.ps1", "timeout_ms": 10000 }
+    ],
+    "postToolUse": [
+      { "matcher": "shell", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/post-shell.ps1", "timeout_ms": 10000 }
+    ],
+    "stop": [
+      { "command": "powershell -NoProfile -ExecutionPolicy Bypass -File hooks/on-stop.ps1", "timeout_ms": 15000 }
+    ]
+  }
+}
