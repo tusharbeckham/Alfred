@@ -37,3 +37,17 @@ parallel, and fan results into an integrator. Use the `subagent` tool.
 ## Anti-thrash
 Two failures of the same approach → change the approach. If that deviates from the
 objective, escalate to the manager rather than improvising.
+
+
+## Executable engine (now real, not just prose)
+The templates above ship as **runnable DAG specs** in `workflows/*.json`, executed by
+`scripts/workflow.py` and launched via `scripts/workflow-run.ps1`:
+- Preview the plan: `python scripts/workflow.py plan workflows/feature.json`
+- Mermaid diagram:  `python scripts/workflow.py graph workflows/feature.json`
+- Dry run (spawns nothing): `powershell -File scripts/workflow-run.ps1 -Workflow feature -Task "..."`
+- Execute for real: add `-Execute`.
+
+The engine enforces the DAG rules (unique names, resolvable deps, **no cycles**, bounded
+`loop_to`) and computes parallel **waves** automatically. New workflows are just JSON, validated
+against the live agent registry with `--check-agents`. Tests: `python scripts/test_workflow.py`.
+This is the executable counterpart to the templates above — design the DAG here, run it there.
