@@ -41,9 +41,9 @@ framework; its cognition profile is tabulated below.
 | alfred-physics | high | physics, coding | pre-write, post-shell, stop |
 | alfred-backend | high | coding, security | pre-write, post-shell, stop |
 | alfred-ml | high | coding, mathematics, self-improvement | pre-write, post-shell, stop |
-| alfred-cloud | high | architecture, security, ci-cd | pre-write, post-shell, stop |
-| alfred-sre | high | debugging, ci-cd, architecture | post-shell, stop |
-| alfred-frontend | high | coding, security | pre-write, post-shell, stop |
+| alfred-cloud | high | cloud-native, architecture, security | pre-write, post-shell, stop |
+| alfred-sre | high | reliability, debugging, ci-cd | post-shell, stop |
+| alfred-frontend | high | frontend, coding, security | pre-write, post-shell, stop |
 | local-coder (opt-in) | sonnet dispatcher → local qwen2.5-coder | coding (routine/low-stakes only) | pre-write, post-shell, stop |
 
 All agents inherit steering (safety/escalation/reporting) and the shared memory KB.
