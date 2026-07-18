@@ -66,3 +66,8 @@ __pycache__/
 
 # Local HF Space upload staging (copies of deploy files; not source of truth)
 deploy/hf-space/
+
+
+# Cloudflare Wrangler local state (build/deploy cache; can hold OAuth tokens - never commit)
+.wrangler/
+deploy/cloudflare/.wrangler/

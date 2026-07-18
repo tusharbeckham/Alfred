@@ -345,6 +345,56 @@ class HistoryTests(unittest.TestCase):
             self.assertIn("feature", wf.format_runs(runs))
 
 
+class ResumeTests(unittest.TestCase):
+    @staticmethod
+    def _write_run(d, records, outputs):
+        os.makedirs(d, exist_ok=True)
+        for name, out in outputs.items():
+            with open(os.path.join(d, f"{name}.md"), "w", encoding="utf-8") as fh:
+                fh.write(f"# stage: {name}\nagent: x\n\n{out}\n")
+        with open(os.path.join(d, "run.json"), "w", encoding="utf-8") as fh:
+            json.dump({"records": records}, fh)
+
+    def _chain(self):
+        return {"name": "w", "stages": [
+            {"name": "a", "agent": "a", "task": "t"},
+            {"name": "b", "agent": "b", "task": "t", "depends_on": ["a"]},
+            {"name": "c", "agent": "c", "task": "t", "depends_on": ["b"]},
+        ]}
+
+    def test_load_completed_reads_outputs(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._write_run(d, [{"stage": "a", "status": "ok"}], {"a": "OUT_A"})
+            done = wf._load_completed(d)
+            self.assertEqual(done, {"a": "OUT_A"})
+
+    def test_missing_run_json_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(wf.WorkflowError):
+                wf._load_completed(d)
+
+    def test_resume_skips_completed_stages(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._write_run(d,
+                            [{"stage": "a", "status": "ok"}, {"stage": "b", "status": "ok"}],
+                            {"a": "A", "b": "B"})
+            ran = []
+            wf.run_workflow(self._chain(), "", executor=lambda ag, t, timeout=None: ran.append(ag) or "ok",
+                            logger=lambda *_: None, resume_from=d)
+            self.assertEqual(ran, ["c"])            # only the unfinished stage ran
+
+    def test_resume_reexecutes_non_ok_stage(self):
+        with tempfile.TemporaryDirectory() as d:
+            # 'a' finished; 'b' timed out last time -> b and c must run again
+            self._write_run(d,
+                            [{"stage": "a", "status": "ok"}, {"stage": "b", "status": "timeout"}],
+                            {"a": "A"})
+            ran = []
+            wf.run_workflow(self._chain(), "", executor=lambda ag, t, timeout=None: ran.append(ag) or "ok",
+                            logger=lambda *_: None, resume_from=d)
+            self.assertEqual(ran, ["b", "c"])       # 'a' cached, rest re-run
+
+
 class PresentationTests(unittest.TestCase):
     def test_plan_mentions_waves(self):
         self.assertIn("wave 0", wf.format_plan(feature_spec()))
