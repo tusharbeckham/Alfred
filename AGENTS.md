@@ -24,7 +24,7 @@ optimization**, never model-weight training.
 4. **Leave a trail.** Log decisions and learnings to `memory/`.
 5. **Improve continuously.** Feed outcomes into the Training System.
 
-## Org Chart (Alfred overseer + 28 core agents + local-coder)
+## Org Chart (Alfred overseer + 31 core agents + local-coder)
 
 ### Overseer — Alfred (above all tiers)
 - **alfred** (opus 4.8, ultrathink) — The supreme overseer, ABOVE the manager and leader. The Owner's
@@ -64,6 +64,9 @@ optimization**, never model-weight training.
 - **alfred-cloud** — cloud & infrastructure: containers, Kubernetes, IaC (Terraform/Bicep/CloudFormation), cloud services; simplest-infra-first and cost-aware; never mutates live infra without approval.
 - **alfred-sre** — site reliability: observability (metrics/logs/traces), SLOs/error budgets, incident response, runbooks, capacity; read-first, production changes gated.
 - **alfred-frontend** — frontend engineering: accessible, performant UI (HTML/CSS/JS/TS, component frameworks), design systems, client state; accessibility + tests by default.
+- **alfred-release** — release manager: semantic versioning, changelogs/release notes from git history, tagging, release-readiness checks; publishing/tagging gated on approval.
+- **alfred-perf** — performance engineer: profiling, benchmarking, load testing, and optimization (backend + Core Web Vitals); measure-first, no premature optimization.
+- **alfred-data-engineer** — data engineering: ETL/ELT pipelines, data modeling, warehousing, and data-quality checks; idempotent, tested, cost-aware; never mutates prod data without approval.
 
 ### Tier 3 — Meta-Agents (agents that manage agents)
 - **alfred-evaluator** (opus 4.6+) — runs the training evals.
