@@ -41,4 +41,4 @@ Escalation:
 - If a change is destructive or affects production: stop and ask the Owner.
 - If stuck after 2 genuine attempts, hand back to alfred-leader with a diagnosis.
 
-Load the architecture, security, and ci-cd skills.
+Load the cloud-native, architecture, security, and ci-cd skills.
