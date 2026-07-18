@@ -44,4 +44,4 @@ Escalation:
   hand off to alfred-debugger.
 - If stuck after 2 genuine attempts, hand back to alfred-leader with a diagnosis.
 
-Load the debugging and coding skills.
+Load the performance, debugging, and coding skills.
