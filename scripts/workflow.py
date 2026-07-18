@@ -306,6 +306,20 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
       * `budget` caps total stage executions (spec.budget or the budget arg);
       * per-stage `timeout` is passed to the executor.
     """
+def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
+                 run_dir=None, logger=print, budget=None, sleeper=time.sleep,
+                 resume_from=None):
+    """Execute the workflow in topological order.
+
+    Returns a dict {stage_name: output}. Features:
+      * loop_to re-runs a target stage when the trigger appears (bounded by
+        max_iterations, with optional exponential backoff+jitter between tries);
+      * `when` skips a stage unless a prior output matches;
+      * `budget` caps total stage executions (spec.budget or the budget arg);
+      * per-stage `timeout` is passed to the executor;
+      * `resume_from` (a prior run dir) skips stages that already succeeded and
+        re-runs only the rest - crash/failure recovery.
+    """
     stages = spec["stages"]
     by_name = {st["name"]: st for st in stages}
     order = topo_order(stages)
@@ -313,6 +327,10 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
     loop_counts = {}
     records = []
     skipped = []
+    cached = _load_completed(resume_from) if resume_from else {}
+    if cached:
+        logger(f"[workflow] resume: {len(cached)} completed stage(s) loaded; "
+               f"they will be skipped.")
     if budget is None:
         budget = spec.get("budget")
     if run_dir:
@@ -330,6 +348,13 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
             break
         name = order[idx]
         stage = by_name[name]
+
+        if name in cached:
+            outputs[name] = cached[name]
+            records.append({"stage": name, "agent": stage["agent"], "status": "cached"})
+            logger(f"[workflow] cached {name} (resumed - skipped)")
+            idx += 1
+            continue
 
         if not evaluate_when(stage, outputs):
             logger(f"[workflow] skip {name}: 'when' condition not met.")
@@ -363,13 +388,16 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
             loop_counts[name] = loop_counts.get(name, 0) + 1
             if loop_counts[name] <= int(loop["max_iterations"]):
                 target = loop["target"]
+                ti = order.index(target)
+                for nm in order[ti:]:      # re-entered loop segment must run fresh
+                    cached.pop(nm, None)
                 delay = backoff_delay(loop.get("backoff", 0), loop_counts[name])
                 if delay > 0:
                     logger(f"[workflow] backoff {delay:.2f}s before retry")
                     sleeper(delay)
                 logger(f"[workflow] loop: '{name}' hit '{loop['trigger']}' -> "
                        f"back to '{target}' (iter {loop_counts[name]})")
-                idx = order.index(target)
+                idx = ti
                 continue
             logger(f"[workflow] loop bound reached at '{name}'; continuing.")
         idx += 1
@@ -384,6 +412,7 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
             "skipped": skipped,
             "loops": loop_counts,
             "budget": budget,
+            "resumed_from": resume_from,
             "records": records,
         }
         with open(os.path.join(run_dir, "run.json"), "w", encoding="utf-8") as fh:
@@ -434,6 +463,37 @@ def format_mermaid(spec):
             lines.append(f"  {st['name']} -. {loop['trigger']} .-> {loop['target']}")
     lines.append("```")
     return "\n".join(lines)
+
+
+def _load_completed(run_dir):
+    """Load {stage: output} for stages that completed OK in a prior run dir.
+
+    Reads run.json for records with status 'ok' and pulls each stage's captured
+    output from its <stage>.md file. Raises WorkflowError if the dir has no run.json.
+    """
+    done = {}
+    if not run_dir:
+        return done
+    rj = os.path.join(run_dir, "run.json")
+    if not os.path.isfile(rj):
+        raise WorkflowError(f"resume: no run.json found in {run_dir}")
+    try:
+        with open(rj, "r", encoding="utf-8-sig") as fh:
+            data = json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        raise WorkflowError(f"resume: cannot read run.json: {exc}")
+    for rec in data.get("records", []):
+        if rec.get("status") == "ok":
+            name = rec["stage"]
+            out = ""
+            md = os.path.join(run_dir, f"{name}.md")
+            if os.path.isfile(md):
+                with open(md, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+                parts = text.split("\n\n", 1)
+                out = parts[1].rstrip("\n") if len(parts) == 2 else ""
+            done[name] = out
+    return done
 
 
 def list_runs(base_dir=RUNS_DIR, limit=10):
@@ -506,6 +566,8 @@ def main(argv=None):
                        help="really run agents (default is a safe dry run)")
     p_run.add_argument("--budget", type=int, default=None,
                        help="max total stage executions for this run")
+    p_run.add_argument("--resume", default=None,
+                       help="prior run dir to resume from (skip stages that already succeeded)")
     p_run.add_argument("--var", action="append", default=[],
                        help="k=v override for {vars.k}; repeatable")
 
@@ -553,7 +615,7 @@ def main(argv=None):
             print("-" * 60)
             outputs = run_workflow(spec, args.task, executor=executor,
                                    extra_vars=extra, run_dir=run_dir,
-                                   budget=args.budget)
+                                   budget=args.budget, resume_from=args.resume)
             print("-" * 60)
             print(f"[workflow] done: {len(outputs)} stage(s) executed.")
             if run_dir:
