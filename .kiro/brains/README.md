@@ -50,6 +50,7 @@ framework; its cognition profile is tabulated below.
 | alfred-qa | high | quality-assurance, coding, debugging | post-shell, stop |
 | alfred-integrations | high | api-integration, coding, security | pre-write, post-shell, stop |
 | alfred-product | medium | product, architecture | stop |
+| alfred-data-scientist | high | data-science, mathematics, coding | pre-write, post-shell, stop |
 | local-coder (opt-in) | sonnet dispatcher → local qwen2.5-coder | coding (routine/low-stakes only) | pre-write, post-shell, stop |
 
 All agents inherit steering (safety/escalation/reporting) and the shared memory KB.
