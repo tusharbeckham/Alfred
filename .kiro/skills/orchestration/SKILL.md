@@ -51,3 +51,9 @@ The engine enforces the DAG rules (unique names, resolvable deps, **no cycles**,
 `loop_to`) and computes parallel **waves** automatically. New workflows are just JSON, validated
 against the live agent registry with `--check-agents`. Tests: `python scripts/test_workflow.py`.
 This is the executable counterpart to the templates above — design the DAG here, run it there.
+
+**Engine v2 controls** (borrowed from Argo/Temporal patterns): per-stage `timeout`; bounded
+`loop_to.backoff` (exponential + jitter); a per-run `budget` on stage executions (`--budget`);
+conditional `when: {stage, contains|not_contains}` stages; and run history via `workflow.py runs`.
+Scaffold a new pipeline with `scripts/new-workflow.ps1 -Name <name>`. Full reference:
+`docs/orchestration/workflow-engine.md`.

@@ -6,8 +6,10 @@ Pure-logic coverage - no agents are spawned. Runs standalone:
 or under pytest:
     python -m pytest scripts/test_workflow.py
 """
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +32,13 @@ def feature_spec():
              "depends_on": ["test", "research"]},
         ],
     }
+
+
+class _FixedRng:
+    """Deterministic rng: uniform always returns 0 (no jitter)."""
+    @staticmethod
+    def uniform(a, b):
+        return 0.0
 
 
 class ValidationTests(unittest.TestCase):
@@ -95,6 +104,55 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(wf.WorkflowError):
             wf.validate_spec(spec)
 
+    def test_loop_negative_backoff(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t"},
+            {"name": "b", "agent": "y", "task": "t", "depends_on": ["a"],
+             "loop_to": {"target": "a", "trigger": "X", "max_iterations": 2,
+                         "backoff": -1}},
+        ]}
+        with self.assertRaises(wf.WorkflowError):
+            wf.validate_spec(spec)
+
+    def test_bad_timeout(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t", "timeout": 0},
+        ]}
+        with self.assertRaises(wf.WorkflowError):
+            wf.validate_spec(spec)
+
+    def test_bad_budget(self):
+        spec = {"name": "w", "budget": 0,
+                "stages": [{"name": "a", "agent": "x", "task": "t"}]}
+        with self.assertRaises(wf.WorkflowError):
+            wf.validate_spec(spec)
+
+    def test_when_missing_stage(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t"},
+            {"name": "b", "agent": "y", "task": "t", "depends_on": ["a"],
+             "when": {"contains": "GO"}},
+        ]}
+        with self.assertRaises(wf.WorkflowError):
+            wf.validate_spec(spec)
+
+    def test_when_unknown_stage(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t",
+             "when": {"stage": "ghost", "contains": "GO"}},
+        ]}
+        with self.assertRaises(wf.WorkflowError):
+            wf.validate_spec(spec)
+
+    def test_when_missing_predicate(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t"},
+            {"name": "b", "agent": "y", "task": "t", "depends_on": ["a"],
+             "when": {"stage": "a"}},
+        ]}
+        with self.assertRaises(wf.WorkflowError):
+            wf.validate_spec(spec)
+
     def test_check_agents_flags_unregistered(self):
         with self.assertRaises(wf.WorkflowError):
             wf.validate_spec(feature_spec(), known_agents={"alfred-planner"})
@@ -138,11 +196,41 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(out, "branch=dev")
 
 
+class ConditionTests(unittest.TestCase):
+    def test_evaluate_when_none_runs(self):
+        self.assertTrue(wf.evaluate_when({"name": "a"}, {}))
+
+    def test_evaluate_when_contains(self):
+        st = {"name": "b", "when": {"stage": "a", "contains": "GO"}}
+        self.assertTrue(wf.evaluate_when(st, {"a": "we GO now"}))
+        self.assertFalse(wf.evaluate_when(st, {"a": "no"}))
+
+    def test_evaluate_when_not_contains(self):
+        st = {"name": "b", "when": {"stage": "a", "not_contains": "SKIP"}}
+        self.assertTrue(wf.evaluate_when(st, {"a": "ok"}))
+        self.assertFalse(wf.evaluate_when(st, {"a": "please SKIP"}))
+
+    def test_run_skips_gated_stage(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "c", "task": "t"},
+            {"name": "b", "agent": "d", "task": "t", "depends_on": ["a"],
+             "when": {"stage": "a", "contains": "GO"}},
+        ]}
+        calls = []
+
+        def ex(agent, task, timeout=None):
+            calls.append(agent)
+            return "STOP"  # 'a' returns STOP -> 'b' gate fails
+
+        wf.run_workflow(spec, "", executor=ex, logger=lambda *_: None)
+        self.assertEqual(calls, ["c"])  # only 'a' ran; 'b' was skipped
+
+
 class RunTests(unittest.TestCase):
     def test_dry_run_executes_every_stage_once(self):
         seen = []
 
-        def rec(agent, task):
+        def rec(agent, task, timeout=None):
             seen.append(agent)
             return "ok"
 
@@ -158,13 +246,12 @@ class RunTests(unittest.TestCase):
         ]}
         calls = {"code": 0, "review": 0}
 
-        def executor(agent, task):
+        def executor(agent, task, timeout=None):
             name = "code" if agent == "c" else "review"
             calls[name] += 1
             return "NEEDS_CHANGES"  # always trips the loop
 
         wf.run_workflow(spec, "obj", executor=executor, logger=lambda *_: None)
-        # initial code + 2 loop re-runs = 3; review runs each pass = 3
         self.assertEqual(calls["code"], 3)
         self.assertEqual(calls["review"], 3)
 
@@ -177,12 +264,85 @@ class RunTests(unittest.TestCase):
         ]}
         calls = {"n": 0}
 
-        def executor(agent, task):
+        def executor(agent, task, timeout=None):
             calls["n"] += 1
             return "all good"
 
         wf.run_workflow(spec, "obj", executor=executor, logger=lambda *_: None)
         self.assertEqual(calls["n"], 2)  # each stage once, no loop
+
+    def test_budget_caps_executions(self):
+        # linear chain of 5; budget 2 -> only 2 stages execute
+        stages = [{"name": f"s{i}", "agent": "a", "task": "t",
+                   "depends_on": ([f"s{i-1}"] if i else [])} for i in range(5)]
+        spec = {"name": "w", "stages": stages}
+        n = {"c": 0}
+
+        def ex(agent, task, timeout=None):
+            n["c"] += 1
+            return "ok"
+
+        wf.run_workflow(spec, "", executor=ex, logger=lambda *_: None, budget=2)
+        self.assertEqual(n["c"], 2)
+
+    def test_timeout_passed_to_executor(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t", "timeout": 42},
+        ]}
+        seen = {}
+
+        def ex(agent, task, timeout=None):
+            seen["t"] = timeout
+            return "ok"
+
+        wf.run_workflow(spec, "", executor=ex, logger=lambda *_: None)
+        self.assertEqual(seen["t"], 42)
+
+
+class BackoffTests(unittest.TestCase):
+    def test_backoff_zero_base(self):
+        self.assertEqual(wf.backoff_delay(0, 1), 0.0)
+
+    def test_backoff_exponential_no_jitter(self):
+        self.assertEqual(wf.backoff_delay(2, 1, rng=_FixedRng), 2.0)
+        self.assertEqual(wf.backoff_delay(2, 2, rng=_FixedRng), 4.0)
+        self.assertEqual(wf.backoff_delay(2, 3, rng=_FixedRng), 8.0)
+
+    def test_run_sleeps_on_backoff_loop(self):
+        spec = {"name": "w", "stages": [
+            {"name": "code", "agent": "c", "task": "t"},
+            {"name": "review", "agent": "r", "task": "t", "depends_on": ["code"],
+             "loop_to": {"target": "code", "trigger": "X", "max_iterations": 2,
+                         "backoff": 1}},
+        ]}
+        delays = []
+        wf.run_workflow(spec, "", executor=lambda a, t, timeout=None: "X",
+                        logger=lambda *_: None, sleeper=delays.append)
+        self.assertEqual(len(delays), 2)          # one sleep per loop retry
+        self.assertTrue(all(d > 0 for d in delays))
+
+
+class HistoryTests(unittest.TestCase):
+    def test_run_writes_run_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            wf.run_workflow(feature_spec(), "obj",
+                            executor=lambda a, t, timeout=None: "ok",
+                            logger=lambda *_: None, run_dir=d)
+            with open(os.path.join(d, "run.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+            self.assertEqual(data["stages_executed"], 5)
+            self.assertEqual(len(data["records"]), 5)
+
+    def test_list_and_format_runs(self):
+        with tempfile.TemporaryDirectory() as base:
+            rd = os.path.join(base, "feature-20260718-000000")
+            os.makedirs(rd)
+            with open(os.path.join(rd, "run.json"), "w", encoding="utf-8") as fh:
+                json.dump({"workflow": "feature", "finished": "2026-07-18T00:00:00",
+                           "stages_executed": 3, "skipped": []}, fh)
+            runs = wf.list_runs(base_dir=base, limit=5)
+            self.assertEqual(len(runs), 1)
+            self.assertIn("feature", wf.format_runs(runs))
 
 
 class PresentationTests(unittest.TestCase):

@@ -19,7 +19,7 @@
       "agent": "alfred-tester",
       "task": "Re-run the full test suite including the characterization tests. If any behavior changed, say NEEDS_CHANGES with details.\n{deps}",
       "depends_on": ["refactor"],
-      "loop_to": { "target": "refactor", "trigger": "NEEDS_CHANGES", "max_iterations": 3 }
+      "loop_to": { "target": "refactor", "trigger": "NEEDS_CHANGES", "max_iterations": 3, "backoff": 5 }
     },
     {
       "name": "diffreview",

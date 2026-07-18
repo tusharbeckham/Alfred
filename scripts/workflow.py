@@ -17,19 +17,32 @@ Design goals:
   * Safe by default: `plan`/`graph`/`validate` never execute anything, and `run`
     defaults to a dry-run echo executor unless `--execute` is passed.
 
+These production-workflow patterns are borrowed from engines like Argo/Temporal
+(see docs/orchestration/kubernetes-decision.md - "adopt patterns, not platform"):
+  * bounded loops with exponential **backoff + jitter** (loop_to.backoff)
+  * per-stage **timeout** (stage.timeout, seconds)
+  * a per-run **budget** on total stage executions (spec.budget or --budget)
+  * **conditional** stages that skip unless a dependency's output matches (when)
+  * **run history** written to memory/workflows and surfaced by `runs`
+
 Spec format (JSON):
 {
   "name": "feature",
   "description": "...",
   "vars": { "branch": "main" },              # optional defaults for {vars.x}
+  "budget": 20,                               # optional max stage executions
   "stages": [
     { "name": "plan",  "agent": "alfred-planner", "task": "Break down: {task}",
       "depends_on": [] },
     { "name": "code",  "agent": "alfred-coder",   "task": "Implement:\n{stage.plan}",
-      "depends_on": ["plan"] },
+      "depends_on": ["plan"], "timeout": 900 },
+    { "name": "ship",  "agent": "alfred-devops",  "task": "Ship it.\n{deps}",
+      "depends_on": ["review"],
+      "when": { "stage": "review", "contains": "APPROVED" } },
     { "name": "review","agent": "alfred-reviewer","task": "Review.\n{deps}",
       "depends_on": ["code"],
-      "loop_to": { "target": "code", "trigger": "NEEDS_CHANGES", "max_iterations": 3 } }
+      "loop_to": { "target": "code", "trigger": "NEEDS_CHANGES",
+                   "max_iterations": 3, "backoff": 2 } }
   ]
 }
 
@@ -37,22 +50,26 @@ Task placeholders: {task} (overall objective), {deps} (all dependency outputs
 concatenated), {stage.<name>} (one stage's output), {vars.<key>}.
 
 CLI:
-  python scripts/workflow.py validate  <spec.json>
+  python scripts/workflow.py validate  <spec.json> [--check-agents]
   python scripts/workflow.py plan      <spec.json>
   python scripts/workflow.py graph     <spec.json>          # Mermaid diagram
-  python scripts/workflow.py run       <spec.json> --task "..." [--execute] [--var k=v]
+  python scripts/workflow.py run       <spec.json> --task "..." [--execute] [--budget N] [--var k=v]
+  python scripts/workflow.py runs      [--limit N]          # recent run history
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import random
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AGENTS_DIR = os.path.join(REPO_ROOT, ".kiro", "agents")
+RUNS_DIR = os.path.join(REPO_ROOT, "memory", "workflows")
 
 
 class WorkflowError(Exception):
@@ -65,7 +82,7 @@ class WorkflowError(Exception):
 def load_spec(path):
     """Read a workflow spec from a JSON file and validate its shape."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             spec = json.load(fh)
     except FileNotFoundError:
         raise WorkflowError(f"spec not found: {path}")
@@ -88,6 +105,8 @@ def validate_spec(spec, known_agents=None):
     stages = spec.get("stages")
     if not isinstance(stages, list) or not stages:
         raise WorkflowError("spec.stages must be a non-empty list")
+    if "budget" in spec and int(spec["budget"]) < 1:
+        raise WorkflowError("spec.budget must be >= 1")
 
     names = []
     for i, st in enumerate(stages):
@@ -123,6 +142,22 @@ def validate_spec(spec, known_agents=None):
             if int(loop.get("max_iterations", 0)) < 1:
                 raise WorkflowError(
                     f"stage '{st['name']}' loop_to needs max_iterations >= 1"
+                )
+            if float(loop.get("backoff", 0)) < 0:
+                raise WorkflowError(f"stage '{st['name']}' loop_to backoff must be >= 0")
+        if "timeout" in st and float(st["timeout"]) <= 0:
+            raise WorkflowError(f"stage '{st['name']}' timeout must be > 0")
+        cond = st.get("when")
+        if cond is not None:
+            if not isinstance(cond, dict) or not cond.get("stage"):
+                raise WorkflowError(f"stage '{st['name']}' when needs a 'stage'")
+            if cond["stage"] not in nameset:
+                raise WorkflowError(
+                    f"stage '{st['name']}' when references unknown stage '{cond['stage']}'"
+                )
+            if "contains" not in cond and "not_contains" not in cond:
+                raise WorkflowError(
+                    f"stage '{st['name']}' when needs 'contains' or 'not_contains'"
                 )
         if known_agents is not None and st["agent"] not in known_agents:
             raise WorkflowError(
@@ -191,7 +226,7 @@ def waves(stages):
 
 
 # --------------------------------------------------------------------------- #
-# Rendering
+# Rendering + conditions (pure, testable)
 # --------------------------------------------------------------------------- #
 def render_task(stage, spec, overall_task, outputs, extra_vars=None):
     """Render a stage's task template with objective, deps, and vars."""
@@ -211,47 +246,79 @@ def render_task(stage, spec, overall_task, outputs, extra_vars=None):
     return task
 
 
+def evaluate_when(stage, outputs):
+    """Return True if the stage should run. A `when` gates on a prior output."""
+    cond = stage.get("when")
+    if not cond:
+        return True
+    src = outputs.get(cond["stage"], "")
+    if "contains" in cond:
+        return cond["contains"] in (src or "")
+    if "not_contains" in cond:
+        return cond["not_contains"] not in (src or "")
+    return True
+
+
+def backoff_delay(base, attempt, rng=random):
+    """Exponential backoff with full jitter: base*2^(attempt-1) + U(0, base/2)."""
+    base = float(base or 0)
+    if base <= 0:
+        return 0.0
+    return base * (2 ** (attempt - 1)) + rng.uniform(0, base / 2.0)
+
+
 # --------------------------------------------------------------------------- #
 # Executors
 # --------------------------------------------------------------------------- #
-def echo_executor(agent, task):
+def echo_executor(agent, task, timeout=None):
     """Dry executor: describes what WOULD run. Never spawns an agent."""
     preview = task if len(task) <= 400 else task[:400] + " ...[truncated]"
     return f"[DRY-RUN] would run agent '{agent}' with task:\n{preview}"
 
 
-def kiro_executor(agent, task):
+def kiro_executor(agent, task, timeout=None):
     """Live executor: runs a stage via `kiro-cli chat --no-interactive`."""
     cmd = ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools",
            "--agent", agent, task]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT,
+                              timeout=timeout)
     except FileNotFoundError:
         raise WorkflowError("kiro-cli not found on PATH; use --dry-run to preview")
+    except subprocess.TimeoutExpired:
+        return f"[TIMEOUT] stage exceeded {timeout}s and was terminated."
     if proc.returncode != 0:
         return (proc.stdout or "") + "\n[stderr]\n" + (proc.stderr or "")
     return proc.stdout or ""
 
 
 # --------------------------------------------------------------------------- #
-# Runner (loop-aware)
+# Runner (loop-aware, budgeted, conditional)
 # --------------------------------------------------------------------------- #
 def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
-                 run_dir=None, logger=print):
-    """Execute the workflow in topological order with bounded loop support.
+                 run_dir=None, logger=print, budget=None, sleeper=time.sleep):
+    """Execute the workflow in topological order.
 
-    Returns a dict {stage_name: output}. loop_to re-runs the target stage (and
-    everything downstream up to the looping stage) when the trigger text appears
-    in the looping stage's output, bounded by max_iterations.
+    Returns a dict {stage_name: output}. Features:
+      * loop_to re-runs a target stage when the trigger appears (bounded by
+        max_iterations, with optional exponential backoff+jitter between tries);
+      * `when` skips a stage unless a prior output matches;
+      * `budget` caps total stage executions (spec.budget or the budget arg);
+      * per-stage `timeout` is passed to the executor.
     """
     stages = spec["stages"]
     by_name = {st["name"]: st for st in stages}
     order = topo_order(stages)
     outputs = {}
     loop_counts = {}
+    records = []
+    skipped = []
+    if budget is None:
+        budget = spec.get("budget")
     if run_dir:
         os.makedirs(run_dir, exist_ok=True)
 
+    started = datetime.now(timezone.utc).isoformat()
     idx = 0
     executed = 0
     guard = 0
@@ -263,23 +330,45 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
             break
         name = order[idx]
         stage = by_name[name]
+
+        if not evaluate_when(stage, outputs):
+            logger(f"[workflow] skip {name}: 'when' condition not met.")
+            outputs[name] = ""
+            skipped.append(name)
+            records.append({"stage": name, "agent": stage["agent"],
+                            "status": "skipped"})
+            idx += 1
+            continue
+
+        if budget is not None and executed >= int(budget):
+            logger(f"[workflow] budget of {budget} stage-executions reached; stopping.")
+            break
+
         task = render_task(stage, spec, overall_task, outputs, extra_vars)
         logger(f"[workflow] -> {name} ({stage['agent']})")
-        out = executor(stage["agent"], task)
+        t0 = time.time()
+        out = executor(stage["agent"], task, timeout=stage.get("timeout"))
+        ms = int((time.time() - t0) * 1000)
         outputs[name] = out
         executed += 1
+        status = "timeout" if isinstance(out, str) and out.startswith("[TIMEOUT]") else "ok"
+        records.append({"stage": name, "agent": stage["agent"], "status": status,
+                        "ms": ms, "iteration": loop_counts.get(name, 0)})
         if run_dir:
             with open(os.path.join(run_dir, f"{name}.md"), "w", encoding="utf-8") as fh:
                 fh.write(f"# stage: {name}\nagent: {stage['agent']}\n\n{out}\n")
 
         loop = stage.get("loop_to")
         if loop and loop["trigger"] in (out or ""):
-            key = name
-            loop_counts[key] = loop_counts.get(key, 0) + 1
-            if loop_counts[key] <= int(loop["max_iterations"]):
+            loop_counts[name] = loop_counts.get(name, 0) + 1
+            if loop_counts[name] <= int(loop["max_iterations"]):
                 target = loop["target"]
+                delay = backoff_delay(loop.get("backoff", 0), loop_counts[name])
+                if delay > 0:
+                    logger(f"[workflow] backoff {delay:.2f}s before retry")
+                    sleeper(delay)
                 logger(f"[workflow] loop: '{name}' hit '{loop['trigger']}' -> "
-                       f"back to '{target}' (iter {loop_counts[key]})")
+                       f"back to '{target}' (iter {loop_counts[name]})")
                 idx = order.index(target)
                 continue
             logger(f"[workflow] loop bound reached at '{name}'; continuing.")
@@ -289,9 +378,13 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
         summary = {
             "workflow": spec["name"],
             "task": overall_task,
-            "stages_executed": executed,
-            "loops": loop_counts,
+            "started": started,
             "finished": datetime.now(timezone.utc).isoformat(),
+            "stages_executed": executed,
+            "skipped": skipped,
+            "loops": loop_counts,
+            "budget": budget,
+            "records": records,
         }
         with open(os.path.join(run_dir, "run.json"), "w", encoding="utf-8") as fh:
             json.dump(summary, fh, indent=2)
@@ -305,6 +398,8 @@ def format_plan(spec):
     lines = [f"workflow: {spec['name']}"]
     if spec.get("description"):
         lines.append(f"  {spec['description']}")
+    if spec.get("budget"):
+        lines.append(f"  budget: {spec['budget']} stage-executions")
     for i, wave in enumerate(waves(spec["stages"])):
         by_name = {st["name"]: st for st in spec["stages"]}
         tag = "parallel" if len(wave) > 1 else "single"
@@ -312,9 +407,16 @@ def format_plan(spec):
         for n in wave:
             st = by_name[n]
             dep = ", ".join(st.get("depends_on", []) or []) or "-"
+            extra = ""
             loop = st.get("loop_to")
-            loop_s = f"  [loop->{loop['target']} on '{loop['trigger']}']" if loop else ""
-            lines.append(f"  - {n:<14} {st['agent']:<22} deps: {dep}{loop_s}")
+            if loop:
+                bo = f" backoff {loop['backoff']}s" if loop.get("backoff") else ""
+                extra += f"  [loop->{loop['target']} on '{loop['trigger']}'{bo}]"
+            if st.get("when"):
+                extra += f"  [when {st['when']['stage']}]"
+            if st.get("timeout"):
+                extra += f"  [timeout {st['timeout']}s]"
+            lines.append(f"  - {n:<14} {st['agent']:<22} deps: {dep}{extra}")
     return "\n".join(lines)
 
 
@@ -331,6 +433,41 @@ def format_mermaid(spec):
         if loop:
             lines.append(f"  {st['name']} -. {loop['trigger']} .-> {loop['target']}")
     lines.append("```")
+    return "\n".join(lines)
+
+
+def list_runs(base_dir=RUNS_DIR, limit=10):
+    """Return recent run summaries (newest first) from memory/workflows/*/run.json."""
+    out = []
+    if not os.path.isdir(base_dir):
+        return out
+    for name in os.listdir(base_dir):
+        rj = os.path.join(base_dir, name, "run.json")
+        if os.path.isfile(rj):
+            try:
+                with open(rj, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                data["_dir"] = name
+                out.append(data)
+            except (json.JSONDecodeError, OSError):
+                continue
+    out.sort(key=lambda d: d.get("finished", ""), reverse=True)
+    return out[:limit]
+
+
+def format_runs(runs):
+    if not runs:
+        return "(no workflow runs recorded yet under memory/workflows/)"
+    lines = [f"{'finished':<22} {'workflow':<12} {'stages':>6} {'skipped':>7}  dir",
+             "-" * 72]
+    for r in runs:
+        lines.append("{:<22} {:<12} {:>6} {:>7}  {}".format(
+            (r.get("finished", "")[:19] or "?"),
+            r.get("workflow", "?"),
+            r.get("stages_executed", 0),
+            len(r.get("skipped", []) or []),
+            r.get("_dir", "?"),
+        ))
     return "\n".join(lines)
 
 
@@ -367,8 +504,13 @@ def main(argv=None):
     p_run.add_argument("--task", default="", help="the overall objective")
     p_run.add_argument("--execute", action="store_true",
                        help="really run agents (default is a safe dry run)")
+    p_run.add_argument("--budget", type=int, default=None,
+                       help="max total stage executions for this run")
     p_run.add_argument("--var", action="append", default=[],
                        help="k=v override for {vars.k}; repeatable")
+
+    p_runs = sub.add_parser("runs", help="list recent workflow runs")
+    p_runs.add_argument("--limit", type=int, default=10)
 
     args = parser.parse_args(argv)
 
@@ -389,6 +531,10 @@ def main(argv=None):
             print(format_mermaid(load_spec(args.spec)))
             return 0
 
+        if args.cmd == "runs":
+            print(format_runs(list_runs(limit=args.limit)))
+            return 0
+
         if args.cmd == "run":
             spec = load_spec(args.spec)
             extra = {}
@@ -400,14 +546,14 @@ def main(argv=None):
             run_dir = None
             if args.execute:
                 stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                run_dir = os.path.join(REPO_ROOT, "memory", "workflows",
-                                       f"{spec['name']}-{stamp}")
+                run_dir = os.path.join(RUNS_DIR, f"{spec['name']}-{stamp}")
             mode = "EXECUTE" if args.execute else "DRY-RUN"
             print(f"[workflow] {mode}: {spec['name']}")
             print(format_plan(spec))
             print("-" * 60)
             outputs = run_workflow(spec, args.task, executor=executor,
-                                   extra_vars=extra, run_dir=run_dir)
+                                   extra_vars=extra, run_dir=run_dir,
+                                   budget=args.budget)
             print("-" * 60)
             print(f"[workflow] done: {len(outputs)} stage(s) executed.")
             if run_dir:
