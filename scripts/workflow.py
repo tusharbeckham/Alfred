@@ -82,7 +82,7 @@ class WorkflowError(Exception):
 def load_spec(path):
     """Read a workflow spec from a JSON file and validate its shape."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             spec = json.load(fh)
     except FileNotFoundError:
         raise WorkflowError(f"spec not found: {path}")
