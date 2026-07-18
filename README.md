@@ -17,7 +17,7 @@ Alfred is a personal AI operating layer: a coordinated team of specialized agent
 ## Highlights
 
 - **Multi-agent orchestration** — an overseer plus 4 tiers of specialized agents (manager, leader, architect, coder, tester, reviewer, researcher, debugger, devops, security, docs, data, ML, backend, cloud, SRE, frontend, and more) that collaborate through DAG pipelines with loops and fan-in.
-- **Executable workflow engine** — declarative DAG workflows (`workflows/*.json`) run by a validated, tested scheduler (`scripts/workflow.py`): automatic parallel waves, fan-in, and bounded loops, with plan/graph/dry-run previews before anything spawns.
+- **Executable workflow engine** — declarative DAG workflows (`workflows/*.json`) run by a validated, tested scheduler (`scripts/workflow.py`): automatic parallel waves, fan-in, bounded loops with **backoff+jitter**, per-stage **timeouts**, per-run **budgets**, **conditional** stages, and **run history** — with plan/graph/dry-run previews before anything spawns.
 - **Bespoke local coder (offline, $0)** — a **Qwen2.5-Coder-7B fine-tuned via QLoRA** on a free cloud GPU, served locally through LM Studio's OpenAI-compatible API. It learns the system's own voice, routing, and safety rules.
 - **Hybrid routing** — routine, low-stakes work runs on the free local model; complex, architectural, or sensitive work escalates to frontier models. Correctness over credit-savings.
 - **Persistent "megamind" memory** — structured episodic memory in a **local SQLite database (FTS5, sub-millisecond recall)** plus **offline semantic recall** via a local embedding model, so the assistant remembers decisions and preferences **with or without the cloud**.
