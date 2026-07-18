@@ -1,0 +1,33 @@
+{
+  "name": "release",
+  "description": "Cut a release: verify readiness, draft notes from git, review, then publish only when approved.",
+  "stages": [
+    {
+      "name": "readiness",
+      "agent": "alfred-devops",
+      "task": "Run the CI gate for this release (lint/build/test). Report the verdict as the last line, exactly 'CI: PASS' or 'CI: FAIL'.\n\n{task}",
+      "depends_on": [],
+      "timeout": 1800
+    },
+    {
+      "name": "notes",
+      "agent": "alfred-release",
+      "task": "Given a green build, determine the semantic version bump and draft the changelog/release notes FROM THE ACTUAL GIT LOG since the last tag. Group by feat/fix/breaking. State the reasoning for the version bump.\n{stage.readiness}",
+      "depends_on": ["readiness"]
+    },
+    {
+      "name": "review",
+      "agent": "alfred-reviewer",
+      "task": "Review the proposed version and changelog for accuracy against the real diff since the last tag. If correct and complete, reply with APPROVED; otherwise reply NEEDS_CHANGES with specifics.\n{deps}",
+      "depends_on": ["notes"],
+      "loop_to": { "target": "notes", "trigger": "NEEDS_CHANGES", "max_iterations": 2, "backoff": 3 }
+    },
+    {
+      "name": "publish",
+      "agent": "alfred-release",
+      "task": "Prepare the release: tag name, artifacts, and publish steps. Per your safety rules, do NOT tag/publish/deploy without explicit Owner approval - present the ready-to-run plan and stop.\n{stage.notes}",
+      "depends_on": ["review"],
+      "when": { "stage": "review", "contains": "APPROVED" }
+    }
+  ]
+}
