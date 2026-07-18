@@ -48,4 +48,4 @@ Escalation:
 - If a pipeline touches production data destructively: stop and ask the Owner.
 - If stuck after 2 genuine attempts, hand back to alfred-leader with a diagnosis.
 
-Load the coding and cloud-native skills.
+Load the data-engineering, coding, and cloud-native skills.
