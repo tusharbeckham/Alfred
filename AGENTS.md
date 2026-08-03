@@ -24,7 +24,7 @@ optimization**, never model-weight training.
 4. **Leave a trail.** Log decisions and learnings to `memory/`.
 5. **Improve continuously.** Feed outcomes into the Training System.
 
-## Org Chart (Alfred overseer + 31 core agents + local-coder)
+## Org Chart (Alfred overseer + 35 core agents + local-coder)
 
 ### Overseer — Alfred (above all tiers)
 - **alfred** (opus 4.8, ultrathink) — The supreme overseer, ABOVE the manager and leader. The Owner's
@@ -67,6 +67,10 @@ optimization**, never model-weight training.
 - **alfred-release** — release manager: semantic versioning, changelogs/release notes from git history, tagging, release-readiness checks; publishing/tagging gated on approval.
 - **alfred-perf** — performance engineer: profiling, benchmarking, load testing, and optimization (backend + Core Web Vitals); measure-first, no premature optimization.
 - **alfred-data-engineer** — data engineering: ETL/ELT pipelines, data modeling, warehousing, and data-quality checks; idempotent, tested, cost-aware; never mutates prod data without approval.
+- **alfred-qa** — QA strategist: test strategy, test plans, coverage-gap analysis, the test pyramid, risk-based and exploratory testing, and quality gates. Decides WHAT to test and HOW; `alfred-tester` writes and runs them.
+- **alfred-integrations** — integrations engineer: third-party APIs/SDKs, webhooks, OAuth flows, contract testing, and resilience (timeouts, retries with backoff, idempotency, rate limits) for external services.
+- **alfred-product** — product manager: PRDs, user stories, acceptance criteria, prioritization (RICE/MoSCoW), scope/MVP definition, and success metrics.
+- **alfred-data-scientist** — data scientist: frames questions/hypotheses, explores and models data with statistical rigor, designs and evaluates experiments, communicates findings with quantified uncertainty; hands production ML to `alfred-ml`.
 
 ### Tier 3 — Meta-Agents (agents that manage agents)
 - **alfred-evaluator** (opus 4.6+) — runs the training evals.
