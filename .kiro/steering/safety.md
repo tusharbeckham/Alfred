@@ -12,6 +12,11 @@ proceed but say what you're doing. High-risk: **STOP and ask the Owner first.**
 1. **Deleting** files/data or any irreversible operation (bulk deletes, `rm -rf`, format).
 2. **Destructive git**: force-push, `reset --hard`, `clean -f`, `branch -D`, history
    rewrite, or pushing to `main`/`master`.
+   > **Enforced, not just advised.** `scripts/protect-main.ps1` runs as a `pre-push` hook
+   > (install with `scripts/install-git-hooks.ps1`) and refuses direct pushes to
+   > `main`/`master`, force pushes, and remote branch deletions. GitHub's server-side
+   > branch protection needs Pro or a public repo, so this is enforced locally instead.
+   > Override deliberately: `$env:ALFRED_ALLOW_PUSH='main'`, or `git push --no-verify`.
 3. **System changes**: editing the Windows registry, drivers, services, scheduled tasks,
    network/firewall config, or anything under `C:\Windows\`, `System32`, or Program Files.
 4. **Software install/removal** system-wide, or changes to security/auth/permissions.
