@@ -5,19 +5,22 @@
  * stdio, newline-delimited). Exposes Alfred's own tools: memory access, eval results,
  * agent listing, and (confirmation-gated) automation triggers.
  *
- * Run: node C:\Alfred\mcp\alfred-server.js
- * Configured in .kiro/settings/mcp.json as the "alfred" server.
+ * Run: node mcp/alfred-server.js   (set ALFRED_ROOT to override the repo location)
+ * Configured as the "alfred" server in .kiro/settings/mcp.json (Kiro) and .mcp.json (Claude Code).
  */
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
-const ROOT = 'C:\\Alfred';
+// Portable: $ALFRED_ROOT wins, else the repo this file lives in. A clone works
+// from any path on any machine without editing the server.
+const ROOT = process.env.ALFRED_ROOT || path.resolve(__dirname, '..');
 const MEMORY = path.join(ROOT, 'memory');
 const RESULTS = path.join(ROOT, 'evals', 'results');
 const AGENTS = path.join(ROOT, '.kiro', 'agents');
 const SCRIPTS = path.join(ROOT, 'scripts');
+const WORKFLOWS = path.join(ROOT, 'workflows');
 
 // ---- JSON-RPC plumbing ----------------------------------------------------
 function send(msg) { process.stdout.write(JSON.stringify(msg) + '\n'); }
@@ -33,6 +36,39 @@ function safeMemoryPath(name) {
   const p = path.resolve(MEMORY, name);
   if (path.dirname(p) !== path.resolve(MEMORY)) throw new Error('Path escapes memory/ directory.');
   return p;
+}
+
+function safeName(name, label) {
+  if (typeof name !== 'string' || !/^[\w.\-]+$/.test(name)) {
+    throw new Error('Invalid ' + label + ' (letters, digits, dot, dash, underscore only).');
+  }
+  return name;
+}
+
+// Resolve a workflow spec argument to a path inside workflows/. Accepts a bare
+// name ("feature" / "feature.json") only — never an arbitrary path.
+function safeWorkflowPath(name) {
+  safeName(name, 'workflow name');
+  const file = name.endsWith('.json') ? name : name + '.json';
+  const p = path.resolve(WORKFLOWS, file);
+  if (path.dirname(p) !== path.resolve(WORKFLOWS)) throw new Error('Path escapes workflows/ directory.');
+  return p;
+}
+
+// Run a repo Python script synchronously and return {code, out}. Dependency-free:
+// uses child_process.spawnSync. Output is capped so a runaway script can't flood.
+function runPython(scriptArgs, timeoutMs) {
+  const py = process.env.ALFRED_PYTHON || 'python';
+  const r = spawnSync(py, scriptArgs, {
+    cwd: ROOT, encoding: 'utf8', timeout: timeoutMs || 120000,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  if (r.error) {
+    if (r.error.code === 'ETIMEDOUT') return { code: 124, out: '(timed out)' };
+    return { code: 127, out: String(r.error.message || r.error) };
+  }
+  const out = (r.stdout || '') + (r.stderr ? '\n' + r.stderr : '');
+  return { code: r.status == null ? 1 : r.status, out: out.trim() || '(no output)' };
 }
 
 // ---- Tool definitions -----------------------------------------------------
@@ -74,6 +110,72 @@ const TOOLS = [
     name: 'trigger_overnight',
     description: 'Return the command to run the overnight backlog. Set confirm=true to actually launch scripts/overnight-run.ps1 in the background.',
     inputSchema: { type: 'object', properties: { confirm: { type: 'boolean' } } }
+  },
+  {
+    name: 'list_workflows',
+    description: 'List the DAG workflow specs available in workflows/ (the pipelines the engine can run).',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'plan_workflow',
+    description: 'Preview a workflow: its parallel execution waves and stages. Read-only, spawns no agents.',
+    inputSchema: {
+      type: 'object',
+      properties: { workflow: { type: 'string', description: 'Workflow name (e.g. "feature"), with or without .json.' } },
+      required: ['workflow']
+    }
+  },
+  {
+    name: 'run_workflow',
+    description: 'Run a workflow DAG. Without confirm=true this is a DRY RUN (spawns nothing, prints the plan). Set confirm=true to execute for real against real model backends — this can spend budget.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflow: { type: 'string', description: 'Workflow name (e.g. "feature"), with or without .json.' },
+        task: { type: 'string', description: 'The objective/task text injected into the pipeline.' },
+        backend: { type: 'string', enum: ['auto', 'claude', 'api', 'local', 'kiro', 'dry'], description: 'Model backend. Default auto.' },
+        parallel: { type: 'integer', description: 'Max concurrent stages per wave (default 4; 1 = strictly sequential).' },
+        budget: { type: 'number', description: 'Cap on stage executions for the run.' },
+        confirm: { type: 'boolean', description: 'Set true to EXECUTE for real. Otherwise a dry run.' }
+      },
+      required: ['workflow', 'task']
+    }
+  },
+  {
+    name: 'workflow_runs',
+    description: 'Show recent workflow run history with status and cost.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'run_agent',
+    description: 'Run one Alfred agent on a task via Ultron. Without confirm=true returns a DRY-RUN preview of the assembled prompt. Set confirm=true to actually call the model backend.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent: { type: 'string', description: 'Agent name (e.g. "alfred-qa").' },
+        task: { type: 'string', description: 'The task/question for the agent.' },
+        backend: { type: 'string', enum: ['local', 'claude', 'api', 'kiro'], description: 'Model backend. Default local (free).' },
+        confirm: { type: 'boolean', description: 'Set true to actually call the model. Otherwise a dry-run prompt preview.' }
+      },
+      required: ['agent', 'task']
+    }
+  },
+  {
+    name: 'recall_memory',
+    description: "Semantic/keyword recall from Alfred's megamind memory (SQLite FTS). Returns the most relevant stored items.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to recall.' },
+        k: { type: 'integer', description: 'How many results (default 5).' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'doctor',
+    description: 'Report which model backends (claude / api / local / kiro) are live and the engine health.',
+    inputSchema: { type: 'object', properties: {} }
   }
 ];
 
@@ -115,6 +217,75 @@ function callTool(name, args) {
       return launchScript('train.ps1', args.confirm);
     case 'trigger_overnight':
       return launchScript('overnight-run.ps1', args.confirm);
+    case 'list_workflows': {
+      if (!fs.existsSync(WORKFLOWS)) return text('(no workflows/ dir)');
+      const specs = fs.readdirSync(WORKFLOWS).filter(f => f.endsWith('.json')).sort();
+      if (!specs.length) return text('(no workflow specs yet)');
+      const out = specs.map(f => {
+        try {
+          const j = JSON.parse(fs.readFileSync(path.join(WORKFLOWS, f), 'utf8'));
+          const stages = Array.isArray(j.stages) ? j.stages.length : 0;
+          return `- ${f.replace(/\.json$/, '')} — ${j.description || '(no description)'} (${stages} stages)`;
+        } catch { return `- ${f} (unparseable)`; }
+      });
+      return text(out.join('\n'));
+    }
+    case 'plan_workflow': {
+      const spec = safeWorkflowPath(args.workflow);
+      const r = runPython([path.join(SCRIPTS, 'workflow.py'), 'plan', spec]);
+      return text(r.out);
+    }
+    case 'workflow_runs': {
+      const r = runPython([path.join(SCRIPTS, 'workflow.py'), 'runs']);
+      return text(r.out);
+    }
+    case 'doctor': {
+      const r = runPython([path.join(SCRIPTS, 'workflow.py'), 'doctor']);
+      return text(r.out);
+    }
+    case 'recall_memory': {
+      const query = String(args.query == null ? '' : args.query);
+      if (!query) return text('(no query given)');
+      const k = Number.isInteger(args.k) && args.k > 0 ? args.k : 5;
+      const r = runPython([path.join(SCRIPTS, 'megamind.py'), 'recall', '-q', query, '-k', String(k)]);
+      return text(r.out);
+    }
+    case 'run_workflow': {
+      const spec = safeWorkflowPath(args.workflow);
+      const task = String(args.task == null ? '' : args.task);
+      if (!task) return text('(no task given)');
+      const scriptArgs = [path.join(SCRIPTS, 'workflow.py'), 'run', spec, '--task', task];
+      if (args.backend) scriptArgs.push('--backend', safeName(String(args.backend), 'backend'));
+      if (Number.isInteger(args.parallel) && args.parallel > 0) scriptArgs.push('--parallel', String(args.parallel));
+      if (typeof args.budget === 'number' && args.budget > 0) scriptArgs.push('--budget', String(args.budget));
+      if (args.confirm === true) {
+        scriptArgs.push('--execute');
+      } else {
+        // Dry run: still show the plan, and tell the caller how to execute for real.
+        const r = runPython(scriptArgs, 600000);
+        return text('DRY RUN (confirm=false — no backends spawned, no budget spent).\n'
+          + 'To execute for real, call again with confirm=true.\n\n' + r.out);
+      }
+      const r = runPython(scriptArgs, 1800000);
+      return text(r.out);
+    }
+    case 'run_agent': {
+      const agent = safeName(String(args.agent || ''), 'agent name');
+      const task = String(args.task == null ? '' : args.task);
+      if (!task) return text('(no task given)');
+      const backend = args.backend ? safeName(String(args.backend), 'backend') : 'local';
+      const scriptArgs = [path.join(SCRIPTS, 'ultron.py'), 'run', '--agent', agent, '--backend', backend, '--quiet'];
+      if (args.confirm === true) {
+        scriptArgs.push(task);
+        const r = runPython(scriptArgs, 600000);
+        return text(r.out);
+      }
+      // Dry run: preview the assembled prompt without calling any model.
+      scriptArgs.push('--dry-run', task);
+      const r = runPython(scriptArgs);
+      return text('DRY RUN (confirm=false — no model called).\n'
+        + 'To run against the ' + backend + ' backend, call again with confirm=true.\n\n' + r.out);
+    }
     default:
       throw new Error('Unknown tool: ' + name);
   }

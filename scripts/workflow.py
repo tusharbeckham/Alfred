@@ -7,8 +7,12 @@ templates into *executable* artifacts: a workflow is a JSON file describing
 stages (each an agent + a task), their dependencies, and optional loops. The
 engine validates the graph (unique names, resolvable deps, no cycles), computes
 parallel execution "waves" (topological levels), renders each stage's task with
-the outputs of its dependencies, and runs it - by default by shelling out to
-`kiro-cli chat --no-interactive --agent <agent>`.
+the outputs of its dependencies, and runs the wave - concurrently.
+
+Backends live in `scripts/backends.py`, so a stage can run on the Claude Code
+CLI (real tools, this PC), the Anthropic API (portable, text-only), a free local
+model via LM Studio, or `kiro-cli` - selected with `--backend`, or resolved
+automatically in that order.
 
 Design goals:
   * Standard library only - runs anywhere Python 3.9+ is present.
@@ -19,11 +23,13 @@ Design goals:
 
 These production-workflow patterns are borrowed from engines like Argo/Temporal
 (see docs/orchestration/kubernetes-decision.md - "adopt patterns, not platform"):
+  * true **parallel waves** (stages at the same topological level run together)
   * bounded loops with exponential **backoff + jitter** (loop_to.backoff)
+  * per-stage **retries** for transient failures, and **on_error** for fatal ones
   * per-stage **timeout** (stage.timeout, seconds)
   * a per-run **budget** on total stage executions (spec.budget or --budget)
   * **conditional** stages that skip unless a dependency's output matches (when)
-  * **run history** written to memory/workflows and surfaced by `runs`
+  * **run history** with per-stage model/backend/cost, written to memory/workflows
 
 Spec format (JSON):
 {
@@ -31,11 +37,12 @@ Spec format (JSON):
   "description": "...",
   "vars": { "branch": "main" },              # optional defaults for {vars.x}
   "budget": 20,                               # optional max stage executions
+  "parallel": 4,                              # optional max concurrent stages
   "stages": [
     { "name": "plan",  "agent": "alfred-planner", "task": "Break down: {task}",
       "depends_on": [] },
     { "name": "code",  "agent": "alfred-coder",   "task": "Implement:\n{stage.plan}",
-      "depends_on": ["plan"], "timeout": 900 },
+      "depends_on": ["plan"], "timeout": 900, "retries": 1, "on_error": "fail" },
     { "name": "ship",  "agent": "alfred-devops",  "task": "Ship it.\n{deps}",
       "depends_on": ["review"],
       "when": { "stage": "review", "contains": "APPROVED" } },
@@ -53,23 +60,32 @@ CLI:
   python scripts/workflow.py validate  <spec.json> [--check-agents]
   python scripts/workflow.py plan      <spec.json>
   python scripts/workflow.py graph     <spec.json>          # Mermaid diagram
-  python scripts/workflow.py run       <spec.json> --task "..." [--execute] [--budget N] [--var k=v]
+  python scripts/workflow.py doctor                         # backend availability
+  python scripts/workflow.py run       <spec.json> --task "..." [--execute]
+        [--backend auto|claude|api|local|kiro|dry] [--parallel N] [--budget N]
+        [--model M] [--resume DIR] [--var k=v]
   python scripts/workflow.py runs      [--limit N]          # recent run history
 """
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import random
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import backends as _backends  # noqa: E402
+
+REPO_ROOT = str(_backends.ROOT)
 AGENTS_DIR = os.path.join(REPO_ROOT, ".kiro", "agents")
 RUNS_DIR = os.path.join(REPO_ROOT, "memory", "workflows")
+
+DEFAULT_PARALLEL = 4
+VALID_ON_ERROR = ("continue", "fail")
 
 
 class WorkflowError(Exception):
@@ -107,6 +123,8 @@ def validate_spec(spec, known_agents=None):
         raise WorkflowError("spec.stages must be a non-empty list")
     if "budget" in spec and int(spec["budget"]) < 1:
         raise WorkflowError("spec.budget must be >= 1")
+    if "parallel" in spec and int(spec["parallel"]) < 1:
+        raise WorkflowError("spec.parallel must be >= 1")
 
     names = []
     for i, st in enumerate(stages):
@@ -147,6 +165,14 @@ def validate_spec(spec, known_agents=None):
                 raise WorkflowError(f"stage '{st['name']}' loop_to backoff must be >= 0")
         if "timeout" in st and float(st["timeout"]) <= 0:
             raise WorkflowError(f"stage '{st['name']}' timeout must be > 0")
+        if "retries" in st and int(st["retries"]) < 0:
+            raise WorkflowError(f"stage '{st['name']}' retries must be >= 0")
+        if "retry_backoff" in st and float(st["retry_backoff"]) < 0:
+            raise WorkflowError(f"stage '{st['name']}' retry_backoff must be >= 0")
+        if "on_error" in st and st["on_error"] not in VALID_ON_ERROR:
+            raise WorkflowError(
+                f"stage '{st['name']}' on_error must be one of {', '.join(VALID_ON_ERROR)}"
+            )
         cond = st.get("when")
         if cond is not None:
             if not isinstance(cond, dict) or not cond.get("stage"):
@@ -212,7 +238,7 @@ def waves(stages):
     """Group stages into parallel execution levels.
 
     Wave 0 = stages with no dependencies; wave k = stages whose dependencies
-    all completed by wave k-1. Stages in the same wave can run in parallel.
+    all completed by wave k-1. Stages in the same wave run concurrently.
     """
     deps = _adjacency(stages)
     order = topo_order(stages)  # also validates acyclicity
@@ -223,6 +249,15 @@ def waves(stages):
     for lvl in range(max(level.values(), default=-1) + 1):
         out.append(sorted([n for n, l in level.items() if l == lvl]))
     return out
+
+
+def wave_index(stages):
+    """{stage name: its wave number} - used to rewind a loop to the right wave."""
+    idx = {}
+    for i, wave in enumerate(waves(stages)):
+        for n in wave:
+            idx[n] = i
+    return idx
 
 
 # --------------------------------------------------------------------------- #
@@ -267,53 +302,42 @@ def backoff_delay(base, attempt, rng=random):
     return base * (2 ** (attempt - 1)) + rng.uniform(0, base / 2.0)
 
 
+def is_failure(output):
+    """True when a stage's output marks a failure the engine should act on."""
+    text = output or ""
+    return text.startswith("[TIMEOUT]") or text.startswith("[ERROR]")
+
+
 # --------------------------------------------------------------------------- #
 # Executors
 # --------------------------------------------------------------------------- #
-def echo_executor(agent, task, timeout=None):
-    """Dry executor: describes what WOULD run. Never spawns an agent."""
-    preview = task if len(task) <= 400 else task[:400] + " ...[truncated]"
-    return f"[DRY-RUN] would run agent '{agent}' with task:\n{preview}"
+# Re-exported from backends so existing callers/tests keep working unchanged.
+echo_executor = _backends.echo_executor
+kiro_executor = _backends.kiro_executor
 
 
-def kiro_executor(agent, task, timeout=None):
-    """Live executor: runs a stage via `kiro-cli chat --no-interactive`."""
-    cmd = ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools",
-           "--agent", agent, task]
+def make_executor(backend="auto", **opts):
+    """Build a live executor for `backend`. Raises WorkflowError if unavailable."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT,
-                              timeout=timeout)
-    except FileNotFoundError:
-        raise WorkflowError("kiro-cli not found on PATH; use --dry-run to preview")
-    except subprocess.TimeoutExpired:
-        return f"[TIMEOUT] stage exceeded {timeout}s and was terminated."
-    if proc.returncode != 0:
-        return (proc.stdout or "") + "\n[stderr]\n" + (proc.stderr or "")
-    return proc.stdout or ""
+        return _backends.make_executor(backend, **opts)
+    except _backends.BackendError as exc:
+        raise WorkflowError(str(exc))
 
 
 # --------------------------------------------------------------------------- #
-# Runner (loop-aware, budgeted, conditional)
+# Runner (wave-parallel, loop-aware, budgeted, conditional)
 # --------------------------------------------------------------------------- #
-def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
-                 run_dir=None, logger=print, budget=None, sleeper=time.sleep):
-    """Execute the workflow in topological order.
-
-    Returns a dict {stage_name: output}. Features:
-      * loop_to re-runs a target stage when the trigger appears (bounded by
-        max_iterations, with optional exponential backoff+jitter between tries);
-      * `when` skips a stage unless a prior output matches;
-      * `budget` caps total stage executions (spec.budget or the budget arg);
-      * per-stage `timeout` is passed to the executor.
-    """
 def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
                  run_dir=None, logger=print, budget=None, sleeper=time.sleep,
-                 resume_from=None):
-    """Execute the workflow in topological order.
+                 resume_from=None, max_parallel=None):
+    """Execute the workflow wave by wave.
 
     Returns a dict {stage_name: output}. Features:
-      * loop_to re-runs a target stage when the trigger appears (bounded by
-        max_iterations, with optional exponential backoff+jitter between tries);
+      * stages in the same wave run **concurrently** (up to `max_parallel`);
+      * `retries` re-runs a stage that errored or timed out, with backoff;
+      * `on_error: "fail"` aborts the run instead of carrying the error forward;
+      * `loop_to` rewinds to the target's wave when the trigger appears (bounded
+        by max_iterations, with optional exponential backoff+jitter between tries);
       * `when` skips a stage unless a prior output matches;
       * `budget` caps total stage executions (spec.budget or the budget arg);
       * per-stage `timeout` is passed to the executor;
@@ -322,7 +346,8 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
     """
     stages = spec["stages"]
     by_name = {st["name"]: st for st in stages}
-    order = topo_order(stages)
+    wave_list = waves(stages)
+    stage_wave = wave_index(stages)
     outputs = {}
     loop_counts = {}
     records = []
@@ -333,75 +358,119 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
                f"they will be skipped.")
     if budget is None:
         budget = spec.get("budget")
+    if max_parallel is None:
+        max_parallel = int(spec.get("parallel", DEFAULT_PARALLEL))
+    max_parallel = max(1, int(max_parallel))
     if run_dir:
         os.makedirs(run_dir, exist_ok=True)
 
     started = datetime.now(timezone.utc).isoformat()
-    idx = 0
     executed = 0
+    aborted = None
+    w = 0
     guard = 0
-    max_guard = len(order) * 50 + 50  # hard safety cap against runaway loops
-    while idx < len(order):
+    max_guard = len(wave_list) * 50 + 50  # hard safety cap against runaway loops
+
+    while w < len(wave_list):
         guard += 1
         if guard > max_guard:
             logger("[workflow] safety cap reached; stopping.")
             break
-        name = order[idx]
-        stage = by_name[name]
 
-        if name in cached:
-            outputs[name] = cached[name]
-            records.append({"stage": name, "agent": stage["agent"], "status": "cached"})
-            logger(f"[workflow] cached {name} (resumed - skipped)")
-            idx += 1
-            continue
+        wave = wave_list[w]
+        runnable = []
+        for name in wave:
+            stage = by_name[name]
+            if name in cached:
+                outputs[name] = cached[name]
+                records.append({"stage": name, "agent": stage["agent"],
+                                "status": "cached"})
+                logger(f"[workflow] cached {name} (resumed - skipped)")
+                continue
+            if not evaluate_when(stage, outputs):
+                logger(f"[workflow] skip {name}: 'when' condition not met.")
+                outputs[name] = ""
+                skipped.append(name)
+                records.append({"stage": name, "agent": stage["agent"],
+                                "status": "skipped"})
+                continue
+            runnable.append(name)
 
-        if not evaluate_when(stage, outputs):
-            logger(f"[workflow] skip {name}: 'when' condition not met.")
-            outputs[name] = ""
-            skipped.append(name)
-            records.append({"stage": name, "agent": stage["agent"],
-                            "status": "skipped"})
-            idx += 1
-            continue
+        # Budget applies across the whole run; trim the wave to what's left.
+        if budget is not None:
+            remaining = int(budget) - executed
+            if remaining <= 0:
+                logger(f"[workflow] budget of {budget} stage-executions reached; stopping.")
+                break
+            if len(runnable) > remaining:
+                logger(f"[workflow] budget of {budget} reached mid-wave; "
+                       f"running {remaining} of {len(runnable)} stage(s) then stopping.")
+                runnable = runnable[:remaining]
+                budget_exhausted = True
+            else:
+                budget_exhausted = False
+        else:
+            budget_exhausted = False
 
-        if budget is not None and executed >= int(budget):
-            logger(f"[workflow] budget of {budget} stage-executions reached; stopping.")
+        # Render every task up front, from outputs of *earlier* waves only, so
+        # concurrent stages can never observe a half-written sibling output.
+        jobs = [(n, render_task(by_name[n], spec, overall_task, outputs, extra_vars))
+                for n in runnable]
+
+        results = _run_wave(jobs, by_name, executor, logger, sleeper,
+                            max_parallel, loop_counts)
+        executed += len(jobs)
+
+        for name, res in results:
+            outputs[name] = res["output"]
+            records.append(res["record"])
+            if run_dir:
+                with open(os.path.join(run_dir, f"{name}.md"), "w",
+                          encoding="utf-8") as fh:
+                    fh.write(f"# stage: {name}\nagent: {by_name[name]['agent']}\n\n"
+                             f"{res['output']}\n")
+            if res["record"]["status"] == "error" and \
+                    by_name[name].get("on_error") == "fail":
+                aborted = f"stage '{name}' failed and its on_error is 'fail'"
+
+        if aborted:
+            logger(f"[workflow] abort: {aborted}")
+            break
+        if budget_exhausted:
             break
 
-        task = render_task(stage, spec, overall_task, outputs, extra_vars)
-        logger(f"[workflow] -> {name} ({stage['agent']})")
-        t0 = time.time()
-        out = executor(stage["agent"], task, timeout=stage.get("timeout"))
-        ms = int((time.time() - t0) * 1000)
-        outputs[name] = out
-        executed += 1
-        status = "timeout" if isinstance(out, str) and out.startswith("[TIMEOUT]") else "ok"
-        records.append({"stage": name, "agent": stage["agent"], "status": status,
-                        "ms": ms, "iteration": loop_counts.get(name, 0)})
-        if run_dir:
-            with open(os.path.join(run_dir, f"{name}.md"), "w", encoding="utf-8") as fh:
-                fh.write(f"# stage: {name}\nagent: {stage['agent']}\n\n{out}\n")
-
-        loop = stage.get("loop_to")
-        if loop and loop["trigger"] in (out or ""):
-            loop_counts[name] = loop_counts.get(name, 0) + 1
-            if loop_counts[name] <= int(loop["max_iterations"]):
-                target = loop["target"]
-                ti = order.index(target)
-                for nm in order[ti:]:      # re-entered loop segment must run fresh
-                    cached.pop(nm, None)
-                delay = backoff_delay(loop.get("backoff", 0), loop_counts[name])
-                if delay > 0:
-                    logger(f"[workflow] backoff {delay:.2f}s before retry")
-                    sleeper(delay)
-                logger(f"[workflow] loop: '{name}' hit '{loop['trigger']}' -> "
-                       f"back to '{target}' (iter {loop_counts[name]})")
-                idx = ti
+        # Loop back-edges are evaluated after the whole wave settles, so a wave
+        # with two loopers rewinds once to the earliest target rather than twice.
+        rewind_to = None
+        for name in wave:
+            loop = by_name[name].get("loop_to")
+            if not loop or name not in outputs:
                 continue
-            logger(f"[workflow] loop bound reached at '{name}'; continuing.")
-        idx += 1
+            if loop["trigger"] not in (outputs[name] or ""):
+                continue
+            loop_counts[name] = loop_counts.get(name, 0) + 1
+            if loop_counts[name] > int(loop["max_iterations"]):
+                logger(f"[workflow] loop bound reached at '{name}'; continuing.")
+                continue
+            target_wave = stage_wave[loop["target"]]
+            logger(f"[workflow] loop: '{name}' hit '{loop['trigger']}' -> back to "
+                   f"'{loop['target']}' (iter {loop_counts[name]})")
+            delay = backoff_delay(loop.get("backoff", 0), loop_counts[name])
+            if delay > 0:
+                logger(f"[workflow] backoff {delay:.2f}s before retry")
+                sleeper(delay)
+            rewind_to = target_wave if rewind_to is None else min(rewind_to, target_wave)
 
+        if rewind_to is not None:
+            # Everything from the loop target onward must run fresh.
+            for nm, lvl in stage_wave.items():
+                if lvl >= rewind_to:
+                    cached.pop(nm, None)
+            w = rewind_to
+            continue
+        w += 1
+
+    total_cost = round(sum(r.get("cost_usd") or 0.0 for r in records), 6)
     if run_dir:
         summary = {
             "workflow": spec["name"],
@@ -412,12 +481,87 @@ def run_workflow(spec, overall_task, executor=echo_executor, extra_vars=None,
             "skipped": skipped,
             "loops": loop_counts,
             "budget": budget,
+            "parallel": max_parallel,
             "resumed_from": resume_from,
+            "aborted": aborted,
+            "cost_usd": total_cost,
             "records": records,
         }
         with open(os.path.join(run_dir, "run.json"), "w", encoding="utf-8") as fh:
             json.dump(summary, fh, indent=2)
     return outputs
+
+
+def _run_wave(jobs, by_name, executor, logger, sleeper, max_parallel, loop_counts):
+    """Run one wave's (name, rendered_task) jobs, returning [(name, result)].
+
+    Sequential when max_parallel == 1 or the wave has a single stage, so the
+    single-threaded behaviour (and its test coverage) is bit-for-bit unchanged.
+    """
+    if not jobs:
+        return []
+    if len(jobs) == 1 or max_parallel == 1:
+        return [(n, _run_stage(n, t, by_name[n], executor, logger, sleeper,
+                               loop_counts)) for n, t in jobs]
+
+    names = ", ".join(n for n, _ in jobs)
+    logger(f"[workflow] wave: running {len(jobs)} stage(s) in parallel -> {names}")
+    out = {}
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(max_parallel, len(jobs))) as pool:
+        futures = {
+            pool.submit(_run_stage, n, t, by_name[n], executor, logger, sleeper,
+                        loop_counts): n
+            for n, t in jobs
+        }
+        for fut in concurrent.futures.as_completed(futures):
+            out[futures[fut]] = fut.result()
+    # Return in wave order (sorted by name), not completion order, so run.json
+    # and the artifacts on disk are deterministic across runs.
+    return [(n, out[n]) for n, _ in jobs]
+
+
+def _run_stage(name, task, stage, executor, logger, sleeper, loop_counts):
+    """Execute one stage, honouring `retries`. Never raises; errors become output."""
+    attempts = int(stage.get("retries", 0)) + 1
+    retry_backoff = stage.get("retry_backoff", 2)
+    timeout = stage.get("timeout")
+    output, meta, status = "", {}, "ok"
+
+    for attempt in range(1, attempts + 1):
+        suffix = f" (attempt {attempt}/{attempts})" if attempts > 1 else ""
+        logger(f"[workflow] -> {name} ({stage['agent']}){suffix}")
+        t0 = time.time()
+        try:
+            output = executor(stage["agent"], task, timeout=timeout)
+            meta = dict(getattr(executor, "last_meta", {}) or {})
+        except Exception as exc:  # a backend blowing up must not kill the run
+            output = f"[ERROR] {type(exc).__name__}: {exc}"
+            meta = {}
+        ms = int((time.time() - t0) * 1000)
+
+        if not is_failure(output):
+            status = "ok"
+            break
+        status = "timeout" if output.startswith("[TIMEOUT]") else "error"
+        if attempt < attempts:
+            delay = backoff_delay(retry_backoff, attempt)
+            logger(f"[workflow] {name} {status}; retrying in {delay:.2f}s")
+            if delay > 0:
+                sleeper(delay)
+
+    record = {
+        "stage": name,
+        "agent": stage["agent"],
+        "status": status,
+        "ms": ms,
+        "iteration": loop_counts.get(name, 0),
+        "attempts": attempt,
+        "backend": meta.get("backend"),
+        "model": meta.get("model"),
+        "cost_usd": meta.get("cost_usd"),
+    }
+    return {"output": output, "record": record}
 
 
 # --------------------------------------------------------------------------- #
@@ -445,6 +589,10 @@ def format_plan(spec):
                 extra += f"  [when {st['when']['stage']}]"
             if st.get("timeout"):
                 extra += f"  [timeout {st['timeout']}s]"
+            if st.get("retries"):
+                extra += f"  [retries {st['retries']}]"
+            if st.get("on_error") == "fail":
+                extra += "  [on_error fail]"
             lines.append(f"  - {n:<14} {st['agent']:<22} deps: {dep}{extra}")
     return "\n".join(lines)
 
@@ -518,14 +666,17 @@ def list_runs(base_dir=RUNS_DIR, limit=10):
 def format_runs(runs):
     if not runs:
         return "(no workflow runs recorded yet under memory/workflows/)"
-    lines = [f"{'finished':<22} {'workflow':<12} {'stages':>6} {'skipped':>7}  dir",
-             "-" * 72]
+    lines = [f"{'finished':<22} {'workflow':<12} {'stages':>6} {'skipped':>7} "
+             f"{'cost':>9}  dir",
+             "-" * 84]
     for r in runs:
-        lines.append("{:<22} {:<12} {:>6} {:>7}  {}".format(
+        cost = r.get("cost_usd")
+        lines.append("{:<22} {:<12} {:>6} {:>7} {:>9}  {}".format(
             (r.get("finished", "")[:19] or "?"),
             r.get("workflow", "?"),
             r.get("stages_executed", 0),
             len(r.get("skipped", []) or []),
+            (f"${cost:.4f}" if cost else "-"),
             r.get("_dir", "?"),
         ))
     return "\n".join(lines)
@@ -559,13 +710,28 @@ def main(argv=None):
     p_graph = sub.add_parser("graph", help="print a Mermaid diagram of the DAG")
     p_graph.add_argument("spec")
 
+    sub.add_parser("doctor", help="show which model backends are available")
+
     p_run = sub.add_parser("run", help="execute the workflow")
     p_run.add_argument("spec")
     p_run.add_argument("--task", default="", help="the overall objective")
     p_run.add_argument("--execute", action="store_true",
                        help="really run agents (default is a safe dry run)")
+    p_run.add_argument("--backend", default="auto",
+                       choices=("auto",) + _backends.BACKENDS,
+                       help="model backend for --execute (default: auto)")
+    p_run.add_argument("--parallel", type=int, default=None,
+                       help=f"max concurrent stages per wave (default {DEFAULT_PARALLEL}; "
+                            f"use 1 for write-heavy workflows)")
+    p_run.add_argument("--model", default=None,
+                       help="override the model for every stage")
+    p_run.add_argument("--max-tokens", type=int, default=16000, dest="max_tokens",
+                       help="api backend: max_tokens per stage (covers thinking too)")
     p_run.add_argument("--budget", type=int, default=None,
                        help="max total stage executions for this run")
+    p_run.add_argument("--max-budget-usd", type=float, default=None,
+                       dest="max_budget_usd",
+                       help="claude backend: per-stage spend cap in USD")
     p_run.add_argument("--resume", default=None,
                        help="prior run dir to resume from (skip stages that already succeeded)")
     p_run.add_argument("--var", action="append", default=[],
@@ -593,6 +759,11 @@ def main(argv=None):
             print(format_mermaid(load_spec(args.spec)))
             return 0
 
+        if args.cmd == "doctor":
+            print(f"Alfred workflow engine - backends (root: {REPO_ROOT})\n")
+            print(_backends.backend_report())
+            return 0
+
         if args.cmd == "runs":
             print(format_runs(list_runs(limit=args.limit)))
             return 0
@@ -604,24 +775,34 @@ def main(argv=None):
                 if "=" in kv:
                     k, v = kv.split("=", 1)
                     extra[k] = v
-            executor = kiro_executor if args.execute else echo_executor
+            if args.execute:
+                executor = make_executor(
+                    args.backend, model=args.model, max_tokens=args.max_tokens,
+                    max_budget_usd=args.max_budget_usd)
+                mode = f"EXECUTE via '{executor.backend}'"
+            else:
+                executor = echo_executor
+                mode = "DRY-RUN"
             run_dir = None
             if args.execute:
                 stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                 run_dir = os.path.join(RUNS_DIR, f"{spec['name']}-{stamp}")
-            mode = "EXECUTE" if args.execute else "DRY-RUN"
             print(f"[workflow] {mode}: {spec['name']}")
             print(format_plan(spec))
             print("-" * 60)
             outputs = run_workflow(spec, args.task, executor=executor,
                                    extra_vars=extra, run_dir=run_dir,
-                                   budget=args.budget, resume_from=args.resume)
+                                   budget=args.budget, resume_from=args.resume,
+                                   max_parallel=args.parallel)
             print("-" * 60)
             print(f"[workflow] done: {len(outputs)} stage(s) executed.")
             if run_dir:
                 print(f"[workflow] artifacts: {run_dir}")
             return 0
     except WorkflowError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except _backends.BackendError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 0
