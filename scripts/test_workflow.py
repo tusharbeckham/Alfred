@@ -6,10 +6,13 @@ Pure-logic coverage - no agents are spawned. Runs standalone:
 or under pytest:
     python -m pytest scripts/test_workflow.py
 """
+import importlib
 import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -403,6 +406,260 @@ class PresentationTests(unittest.TestCase):
         m = wf.format_mermaid(feature_spec())
         self.assertIn("flowchart TD", m)
         self.assertIn("plan --> code", m)
+
+
+class ParallelTests(unittest.TestCase):
+    """Wave-parallel execution: concurrency, determinism, and the max_parallel=1
+    escape hatch that must stay bit-for-bit identical to the sequential path."""
+
+    def _diamond(self):
+        # a -> {b, c} -> d : b and c share a wave and may run concurrently.
+        return {"name": "w", "stages": [
+            {"name": "a", "agent": "a", "task": "t"},
+            {"name": "b", "agent": "b", "task": "t", "depends_on": ["a"]},
+            {"name": "c", "agent": "c", "task": "t", "depends_on": ["a"]},
+            {"name": "d", "agent": "d", "task": "t", "depends_on": ["b", "c"]},
+        ]}
+
+    def test_same_wave_stages_run_concurrently(self):
+        # b and c must overlap in time when max_parallel allows it. Each blocks on
+        # a barrier that only releases once both have entered - so a *sequential*
+        # runner would deadlock, proving genuine concurrency.
+        started = threading.Barrier(2, timeout=5)
+        overlapped = {"b": False, "c": False}
+
+        def ex(agent, task, timeout=None):
+            if agent in ("b", "c"):
+                try:
+                    started.wait()
+                    overlapped[agent] = True
+                except threading.BrokenBarrierError:
+                    pass
+            return "ok"
+
+        wf.run_workflow(self._diamond(), "", executor=ex,
+                        logger=lambda *_: None, max_parallel=4)
+        self.assertTrue(overlapped["b"] and overlapped["c"])
+
+    def test_results_are_deterministic_regardless_of_finish_order(self):
+        # c finishes before b, but run.json records must stay in wave (name) order.
+        def ex(agent, task, timeout=None):
+            if agent == "b":
+                time.sleep(0.05)
+            return f"out-{agent}"
+
+        with tempfile.TemporaryDirectory() as d:
+            wf.run_workflow(self._diamond(), "", executor=ex,
+                            logger=lambda *_: None, max_parallel=4, run_dir=d)
+            with open(os.path.join(d, "run.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+        order = [r["stage"] for r in data["records"]]
+        self.assertLess(order.index("b"), order.index("c"))  # sorted, not by finish
+
+    def test_max_parallel_one_matches_default(self):
+        # The sequential escape hatch must produce identical outputs to a parallel
+        # run for a deterministic executor.
+        def ex(agent, task, timeout=None):
+            return f"out-{agent}"
+
+        seq = wf.run_workflow(self._diamond(), "", executor=ex,
+                              logger=lambda *_: None, max_parallel=1)
+        par = wf.run_workflow(self._diamond(), "", executor=ex,
+                              logger=lambda *_: None, max_parallel=4)
+        self.assertEqual(seq, par)
+
+    def test_max_parallel_floors_at_one(self):
+        # 0 / negative must clamp to 1, never disable execution.
+        seen = []
+        wf.run_workflow(self._diamond(), "", executor=lambda a, t, timeout=None: seen.append(a) or "ok",
+                        logger=lambda *_: None, max_parallel=0)
+        self.assertEqual(sorted(seen), ["a", "b", "c", "d"])
+
+
+class RetryTests(unittest.TestCase):
+    """Per-stage `retries`: attempts = retries+1, backoff between tries, and the
+    stage still succeeds if a later attempt does."""
+
+    def test_retries_until_success(self):
+        # Fails [ERROR] twice, then succeeds on attempt 3 (retries=2 -> 3 attempts).
+        calls = {"n": 0}
+
+        def ex(agent, task, timeout=None):
+            calls["n"] += 1
+            return "ok" if calls["n"] >= 3 else "[ERROR] transient"
+
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t", "retries": 2},
+        ]}
+        out = wf.run_workflow(spec, "", executor=ex, logger=lambda *_: None,
+                              sleeper=lambda *_: None)
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(out["a"], "ok")
+
+    def test_retries_exhausted_keeps_last_error(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t", "retries": 1},
+        ]}
+        n = {"c": 0}
+
+        def ex(agent, task, timeout=None):
+            n["c"] += 1
+            return "[ERROR] still broken"
+
+        out = wf.run_workflow(spec, "", executor=ex, logger=lambda *_: None,
+                              sleeper=lambda *_: None)
+        self.assertEqual(n["c"], 2)  # 1 retry -> 2 attempts
+        self.assertTrue(out["a"].startswith("[ERROR]"))
+
+    def test_retry_sleeps_between_attempts(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "x", "task": "t", "retries": 2,
+             "retry_backoff": 1},
+        ]}
+        delays = []
+        wf.run_workflow(spec, "", executor=lambda a, t, timeout=None: "[ERROR] x",
+                        logger=lambda *_: None, sleeper=delays.append)
+        self.assertEqual(len(delays), 2)  # a sleep after attempts 1 and 2, none after 3
+        self.assertTrue(all(d > 0 for d in delays))
+
+    def test_executor_exception_becomes_error_output(self):
+        # A backend blowing up must not crash the run; it becomes an [ERROR] output.
+        def boom(agent, task, timeout=None):
+            raise RuntimeError("backend exploded")
+
+        spec = {"name": "w", "stages": [{"name": "a", "agent": "x", "task": "t"}]}
+        out = wf.run_workflow(spec, "", executor=boom, logger=lambda *_: None)
+        self.assertTrue(out["a"].startswith("[ERROR]"))
+        self.assertIn("backend exploded", out["a"])
+
+
+class OnErrorTests(unittest.TestCase):
+    """`on_error: fail` aborts the run; the default carries the error forward."""
+
+    def _spec(self, on_error=None):
+        first = {"name": "a", "agent": "a", "task": "t"}
+        if on_error:
+            first["on_error"] = on_error
+        return {"name": "w", "stages": [
+            first,
+            {"name": "b", "agent": "b", "task": "t", "depends_on": ["a"]},
+        ]}
+
+    def test_on_error_fail_aborts_downstream(self):
+        ran = []
+
+        def ex(agent, task, timeout=None):
+            ran.append(agent)
+            return "[ERROR] boom" if agent == "a" else "ok"
+
+        with tempfile.TemporaryDirectory() as d:
+            wf.run_workflow(self._spec("fail"), "", executor=ex,
+                            logger=lambda *_: None, run_dir=d)
+            with open(os.path.join(d, "run.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+        self.assertEqual(ran, ["a"])         # b never ran
+        self.assertIsNotNone(data["aborted"])
+
+    def test_default_carries_error_forward(self):
+        ran = []
+
+        def ex(agent, task, timeout=None):
+            ran.append(agent)
+            return "[ERROR] boom" if agent == "a" else "ok"
+
+        wf.run_workflow(self._spec(), "", executor=ex, logger=lambda *_: None)
+        self.assertEqual(ran, ["a", "b"])    # no on_error -> b still runs
+
+    def test_validate_rejects_unknown_on_error(self):
+        with self.assertRaises(wf.WorkflowError):
+            wf.validate_spec(self._spec("explode"))
+
+
+class CostAccountingTests(unittest.TestCase):
+    """Per-stage cost from executor.last_meta is recorded and summed into run.json."""
+
+    class _MeteredExecutor:
+        """Executor that reports a per-call cost via the last_meta protocol."""
+        def __init__(self, cost):
+            self.cost = cost
+            self.last_meta = {}
+
+        def __call__(self, agent, task, timeout=None):
+            self.last_meta = {"backend": "api", "model": "claude-opus-5",
+                              "cost_usd": self.cost}
+            return "ok"
+
+    def test_total_cost_is_summed(self):
+        spec = {"name": "w", "stages": [
+            {"name": "a", "agent": "a", "task": "t"},
+            {"name": "b", "agent": "b", "task": "t", "depends_on": ["a"]},
+            {"name": "c", "agent": "c", "task": "t", "depends_on": ["b"]},
+        ]}
+        with tempfile.TemporaryDirectory() as d:
+            wf.run_workflow(spec, "", executor=self._MeteredExecutor(0.25),
+                            logger=lambda *_: None, run_dir=d)
+            with open(os.path.join(d, "run.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+        self.assertAlmostEqual(data["cost_usd"], 0.75, places=6)
+        self.assertTrue(all(r["cost_usd"] == 0.25 for r in data["records"]))
+        self.assertEqual(data["records"][0]["backend"], "api")
+
+    def test_missing_cost_sums_to_zero(self):
+        # The echo executor reports no cost; run.json still gets a numeric total.
+        with tempfile.TemporaryDirectory() as d:
+            wf.run_workflow(feature_spec(), "obj",
+                            executor=lambda a, t, timeout=None: "ok",
+                            logger=lambda *_: None, run_dir=d)
+            with open(os.path.join(d, "run.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+        self.assertEqual(data["cost_usd"], 0.0)
+
+
+def _load_sync_module():
+    """Import the OPTIONAL Claude Code layer generator.
+
+    `sync-claude-config.py` and the `.claude/` tree it generates belong to the
+    Claude Code front end, not to the workflow engine. The engine must test
+    green without them, so treat the generator as optional: return None when it
+    is absent and let the drift gate skip rather than error.
+    """
+    try:
+        # sync-claude-config.py has a hyphenated name; import it via importlib.
+        return importlib.import_module("sync-claude-config")
+    except ImportError:
+        return None
+
+
+_SYNC = _load_sync_module()
+
+
+@unittest.skipIf(_SYNC is None,
+                 "Claude Code layer not present (scripts/sync-claude-config.py absent)")
+class SyncDriftTests(unittest.TestCase):
+    """The CI gate: sync-claude-config must render deterministically and its
+    on-disk output must already be in sync (no uncommitted drift).
+
+    Skipped automatically when the Claude Code front end is not checked out.
+    """
+
+    def setUp(self):
+        self.sync = _SYNC
+
+    def test_render_all_is_pure_and_deterministic(self):
+        a = self.sync.render_all()
+        b = self.sync.render_all()
+        self.assertEqual(a, b)
+        self.assertTrue(a)  # renders at least one file
+
+    def test_generated_files_carry_banner(self):
+        rendered = self.sync.render_all()
+        claude_md = rendered["CLAUDE.md"]
+        self.assertIn("GENERATED by scripts/sync-claude-config.py", claude_md)
+
+    def test_disk_is_in_sync(self):
+        # Equivalent to `sync-claude-config.py --check`: nothing stale on disk.
+        bad = self.sync.stale(self.sync.render_all())
+        self.assertEqual(bad, [], f"stale generated files: {bad}")
 
 
 if __name__ == "__main__":
