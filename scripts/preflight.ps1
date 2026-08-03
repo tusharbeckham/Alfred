@@ -5,11 +5,12 @@
   Runs the local, deterministic gates and aggregates their verdicts:
     1. Workflow engine unit tests   (python scripts/test_workflow.py)
     2. Model backend unit tests      (python scripts/test_backends.py)
-    3. MCP server security tests     (python scripts/test_mcp_server.py - slowest gate,
+    3. Ultron CLI unit tests         (python scripts/test_ultron.py)
+    4. MCP server security tests     (python scripts/test_mcp_server.py - slowest gate,
                                       drives the real server over stdio JSON-RPC)
-    4. Workflow spec validation      (every workflows/*.json, --check-agents)
-    5. Safety lint                   (scripts/safety-lint.ps1, fail on High)
-    6. Dependency + hygiene audit    (scripts/dep-audit.ps1, fail on tracked secrets)
+    5. Workflow spec validation      (every workflows/*.json, --check-agents)
+    6. Safety lint                   (scripts/safety-lint.ps1, fail on High)
+    7. Dependency + hygiene audit    (scripts/dep-audit.ps1, fail on tracked secrets)
   No agents are spawned and nothing costs Kiro credits. Exit 0 only if every gate passes -
   wire it into a pre-commit hook or run it before you push.
 .EXAMPLE  powershell -File scripts\preflight.ps1
@@ -33,6 +34,10 @@ Step 'Workflow engine tests' { python scripts\test_workflow.py 2>&1 | Select-Obj
 # backends.py is the seam every front end dispatches through, so its suite gates too.
 # Fully offline: the HTTP paths are mocked, so this never touches the network.
 Step 'Model backend tests' { python scripts\test_backends.py 2>&1 | Select-Object -Last 3 }
+
+# Ultron was refactored onto backends.py; this pre-existing suite is the regression
+# guard proving that refactor kept the CLI's behaviour. Fast (~0.02s).
+Step 'Ultron CLI tests' { python scripts\test_ultron.py 2>&1 | Select-Object -Last 3 }
 
 # The MCP server is reachable by any MCP client and several of its tools spawn
 # subprocesses, so its input guards are a security boundary. Slowest gate (~40s):
