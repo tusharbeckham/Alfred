@@ -4,9 +4,10 @@
 .DESCRIPTION
   Runs the local, deterministic gates and aggregates their verdicts:
     1. Workflow engine unit tests   (python scripts/test_workflow.py)
-    2. Workflow spec validation      (every workflows/*.json, --check-agents)
-    3. Safety lint                   (scripts/safety-lint.ps1, fail on High)
-    4. Dependency + hygiene audit    (scripts/dep-audit.ps1, fail on tracked secrets)
+    2. Model backend unit tests      (python scripts/test_backends.py)
+    3. Workflow spec validation      (every workflows/*.json, --check-agents)
+    4. Safety lint                   (scripts/safety-lint.ps1, fail on High)
+    5. Dependency + hygiene audit    (scripts/dep-audit.ps1, fail on tracked secrets)
   No agents are spawned and nothing costs Kiro credits. Exit 0 only if every gate passes -
   wire it into a pre-commit hook or run it before you push.
 .EXAMPLE  powershell -File scripts\preflight.ps1
@@ -26,6 +27,10 @@ function Step($name, $script) {
 }
 
 Step 'Workflow engine tests' { python scripts\test_workflow.py 2>&1 | Select-Object -Last 3 }
+
+# backends.py is the seam every front end dispatches through, so its suite gates too.
+# Fully offline: the HTTP paths are mocked, so this never touches the network.
+Step 'Model backend tests' { python scripts\test_backends.py 2>&1 | Select-Object -Last 3 }
 
 Step 'Workflow spec validation' {
   $bad = 0
