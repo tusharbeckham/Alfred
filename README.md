@@ -121,7 +121,7 @@ alfred "add input validation to this function"
 | `scripts/` | Automation: **harness**, **workflow engine**, security tools, local coder, memory, web, voice (TTS), fine-tune builder, CI, training |
 | `workflows/` | Declarative multi-agent DAG workflow specs (run by `scripts/workflow.py`) |
 | `evals/` | Eval datasets + rubrics |
-| `docs/` | Setup and workflow guides (incl. [`harness.md`](docs/harness.md)) |
+| `docs/` | Setup and workflow guides (incl. [`harness.md`](docs/harness.md), [`graph-engineering-plan.md`](docs/graph-engineering-plan.md)) |
 | `notebooks/` | Fine-tune notebook |
 
 > Personal data — the memory trail, fine-tune datasets, eval outputs, and secrets — is kept **local-only** and git-ignored by design.
