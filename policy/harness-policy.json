@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "description": "Alfred harness capability policy. Deny-by-default. Only capabilities listed here can run, and only the listed callers may invoke them. This file is integrity-protected: policy/harness-policy.sig must match, or the harness refuses to run.",
+  "settings": {
+    "denyByDefault": true,
+    "requireSignature": true,
+    "auditLog": "memory/harness-audit.jsonl",
+    "maxRuntimeSeconds": 900,
+    "workspaceRoot": "C:/Alfred",
+    "allowedWorkspaceRoots": ["C:/Alfred", "C:/projects"]
+  },
+  "callers": {
+    "owner": {
+      "description": "The Owner at an interactive terminal. Highest trust.",
+      "trust": "high",
+      "authRequired": false,
+      "capabilities": ["*"]
+    },
+    "kiro-agent": {
+      "description": "A Kiro/Claude agent running under C:/Alfred steering. Trusted for read + project work.",
+      "trust": "medium",
+      "authRequired": false,
+      "capabilities": ["status", "doctor", "recall", "remember", "web-search", "index", "test", "lint", "ci", "workflow-plan", "git-status", "disk-report", "process-report"]
+    },
+    "local-model": {
+      "description": "An untrusted LOCAL model (LM Studio / Ollama / any local weights). Read-only diagnostics ONLY. Cannot mutate the machine, cannot reach the network, cannot run tests that execute repo code.",
+      "trust": "untrusted",
+      "authRequired": true,
+      "capabilities": ["status", "recall", "git-status", "disk-report", "process-report"]
+    },
+    "scheduled": {
+      "description": "Unattended/overnight runs. Project-scoped work only; every gated capability is refused and queued for approval.",
+      "trust": "low",
+      "authRequired": true,
+      "capabilities": ["status", "doctor", "recall", "remember", "index", "test", "lint", "ci", "workflow-plan", "git-status", "disk-report"]
+    }
+  },
+  "capabilities": {
+    "status": { "risk": "read", "description": "Alfred system status report", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-status.ps1"], "gated": false },
+    "doctor": { "risk": "read", "description": "Environment/health check", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-doctor.ps1"], "gated": false },
+    "recall": { "risk": "read", "description": "Query the megamind memory index", "command": "python", "args": ["scripts/megamind.py", "recall", "-q", "{query}", "-k", "5"], "gated": false, "params": { "query": { "type": "string", "maxLength": 300 } } },
+    "remember": { "risk": "write-memory", "description": "Append a memory entry", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-remember.ps1", "-Type", "{type}", "-Topic", "{topic}", "-Text", "{text}"], "gated": false, "params": { "type": { "type": "enum", "values": ["decision", "learning", "fact", "preference", "outcome"] }, "topic": { "type": "string", "maxLength": 120 }, "text": { "type": "string", "maxLength": 2000 } } },
+    "web-search": { "risk": "network-read", "description": "Keyless web search", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-web.ps1", "-Search", "{query}", "-Max", "5"], "gated": false, "params": { "query": { "type": "string", "maxLength": 300 } } },
+    "index": { "risk": "read", "description": "Index a project directory", "command": "node", "args": ["C:/projects/ultron-cli/bin/ultron.mjs", "index", "{path}"], "gated": false, "params": { "path": { "type": "path", "mustBeInsideWorkspace": true } } },
+    "git-status": { "risk": "read", "description": "Git status of a repo", "command": "git", "args": ["-C", "{path}", "status", "--porcelain=v1", "--branch"], "gated": false, "params": { "path": { "type": "path", "mustBeInsideWorkspace": true } } },
+    "disk-report": { "risk": "read", "description": "Disk free space", "command": "powershell", "args": ["-NoProfile", "-Command", "Get-PSDrive -PSProvider FileSystem | Select-Object Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}},@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}} | ConvertTo-Json"], "gated": false },
+    "process-report": { "risk": "read", "description": "Top processes by memory", "command": "powershell", "args": ["-NoProfile", "-Command", "Get-Process | Sort-Object WS -Descending | Select-Object -First 15 Name,Id,@{n='MemMB';e={[math]::Round($_.WS/1MB,1)}} | ConvertTo-Json"], "gated": false },
+    "test": { "risk": "execute-project-code", "description": "Run the Alfred python test suite", "command": "python", "args": ["scripts/test_workflow.py"], "gated": false },
+    "lint": { "risk": "read", "description": "Safety-lint the scripts", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/safety-lint.ps1"], "gated": false },
+    "ci": { "risk": "execute-project-code", "description": "Run the CI gate", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/ci-run.ps1"], "gated": false },
+    "workflow-plan": { "risk": "read", "description": "Preview a workflow DAG without spawning agents", "command": "python", "args": ["scripts/workflow.py", "plan", "workflows/{workflow}.json"], "gated": false, "params": { "workflow": { "type": "enum", "values": ["feature", "bugfix", "refactor", "research", "audit", "release"] } } },
+    "workflow-run": { "risk": "spawn-agents", "description": "Execute a workflow DAG for real (spends credits)", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/workflow-run.ps1", "-Workflow", "{workflow}", "-Task", "{task}", "-Execute"], "gated": true, "params": { "workflow": { "type": "enum", "values": ["feature", "bugfix", "refactor", "research", "audit", "release"] }, "task": { "type": "string", "maxLength": 500 } } },
+    "backup": { "risk": "write-disk", "description": "Copy the Alfred config tree to a timestamped backup folder", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/harness-backup.ps1"], "gated": true },
+    "git-commit": { "risk": "write-vcs", "description": "Stage specific files and commit (never pushes)", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/harness-commit.ps1", "-Message", "{message}"], "gated": true, "params": { "message": { "type": "string", "maxLength": 300 } } }
+  },
+  "forbidden": {
+    "description": "Patterns that are refused for EVERY caller including the Owner, as defence in depth. The harness never builds a shell string, so these are a second line rather than the primary control.",
+    "argumentPatterns": [
+      "(?i)\\brm\\s+-rf\\b",
+      "(?i)\\bdel\\s+/[sqf]\\b",
+      "(?i)\\bformat\\b\\s+[a-z]:",
+      "(?i)\\bdiskpart\\b",
+      "(?i)\\bbcdedit\\b",
+      "(?i)\\bvssadmin\\b",
+      "(?i)\\bcipher\\s+/w\\b",
+      "(?i)\\breg\\s+(add|delete)\\b",
+      "(?i)Remove-Item.*-Recurse",
+      "(?i)Set-ExecutionPolicy",
+      "(?i)(New|Set|Stop)-Service\\b",
+      "(?i)Register-ScheduledTask",
+      "(?i)schtasks\\s+/(create|delete|change)",
+      "(?i)netsh\\s+(advfirewall|firewall)",
+      "(?i)New-NetFirewallRule",
+      "(?i)\\bnet\\s+(user|localgroup)\\b",
+      "(?i)Add-LocalGroupMember",
+      "(?i)git\\s+push",
+      "(?i)git\\s+reset\\s+--hard",
+      "(?i)git\\s+clean\\s+-",
+      "(?i)\\bshutdown\\b",
+      "(?i)(Stop|Restart)-Computer",
+      "(?i)Invoke-Expression",
+      "(?i)\\biex\\b",
+      "(?i)\\|\\s*(bash|sh|powershell|pwsh)\\b",
+      "(?i)DownloadString",
+      "(?i)FromBase64String",
+      "(?i)-EncodedCommand"
+    ],
+    "pathPrefixes": [
+      "C:/Windows",
+      "C:/Program Files",
+      "C:/Program Files (x86)",
+      "C:/ProgramData/Microsoft",
+      "C:/Users/Default"
+    ],
+    "pathPatterns": [
+      "(?i)\\.env$",
+      "(?i)/secrets(/|$)",
+      "(?i)/policy(/|$)",
+      "(?i)\\.key$",
+      "(?i)\\.pem$",
+      "(?i)\\.pfx$",
+      "(?i)id_rsa",
+      "(?i)harness-policy\\.(json|sig)$"
+    ]
+  }
+}

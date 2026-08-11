@@ -16,8 +16,10 @@ Alfred is a personal AI operating layer: a coordinated team of specialized agent
 
 ## Highlights
 
+- **A true orchestrator at the top** — the `alfred` agent owns outcomes end-to-end: every agent in the registry is pre-trusted, so delegation never stalls on a permission prompt, while destructive/system/production actions stay hard-gated. Backed by two doctrine skills (`true-leadership`, `token-economy`) and always-on `resilience` + `token-budget` steering that define a 7-rung degradation ladder instead of a crash.
 - **Multi-agent orchestration** — an overseer plus 4 tiers of specialized agents (manager, leader, architect, coder, tester, reviewer, researcher, debugger, devops, security, docs, data, ML, backend, cloud, SRE, frontend, and more) that collaborate through DAG pipelines with loops and fan-in.
 - **Executable workflow engine** — declarative DAG workflows (`workflows/*.json`) run by a validated, tested scheduler (`scripts/workflow.py`): automatic parallel waves, fan-in, bounded loops with **backoff+jitter**, per-stage **timeouts**, per-run **budgets**, **conditional** stages, and **run history** — with plan/graph/dry-run previews before anything spawns.
+- **A policy-gated automation harness** — one entrypoint (`harness.cmd`) to automate this machine, guarded by a **cryptographically signed** capability policy. Deny-by-default, per-caller allowlists, argv-only execution, and an append-only audit trail. An untrusted local model that edits the policy invalidates its signature and the harness refuses to run anything. See [`docs/harness.md`](docs/harness.md).
 - **Bespoke local coder (offline, $0)** — a **Qwen2.5-Coder-7B fine-tuned via QLoRA** on a free cloud GPU, served locally through LM Studio's OpenAI-compatible API. It learns the system's own voice, routing, and safety rules.
 - **Hybrid routing** — routine, low-stakes work runs on the free local model; complex, architectural, or sensitive work escalates to frontier models. Correctness over credit-savings.
 - **Persistent "megamind" memory** — structured episodic memory in a **local SQLite database (FTS5, sub-millisecond recall)** plus **offline semantic recall** via a local embedding model, so the assistant remembers decisions and preferences **with or without the cloud**.
@@ -46,6 +48,33 @@ Owner ─ Alfred (overseer)
 - The **local coder** is a *genuine QLoRA fine-tune* of an open model you own end-to-end.
 
 ---
+
+## The harness — automating this machine safely
+
+One entrypoint automates the PC, and **nothing runs unless a signed policy allows it for that caller**.
+
+```powershell
+harness verify                              # is the policy intact?
+harness list --caller owner                 # what can I run?
+harness run status                          # run a capability
+harness run git-status --param path=C:\Alfred
+harness run backup --approve                # gated: needs explicit approval
+```
+
+Five independent controls, because the threat being defended against is *a local model that
+can edit files in this repo*:
+
+| Control | Effect |
+|---|---|
+| **Signed policy** | `policy/harness-policy.json` is HMAC-SHA256 signed; the key lives in `secrets/` where every agent is denied access. Edit the policy without the key and the harness refuses to run **anything**. |
+| **Deny by default** | Capabilities not in the policy cannot run, whoever asks. |
+| **Per-caller allowlists** | `owner` (high) · `kiro-agent` (medium) · `local-model` (**untrusted**, 5 read-only diagnostics, token required) · `scheduled` (low). |
+| **Argv-only execution** | No shell string is ever built. Params are type-validated, paths confined, enums exact-matched. Injection payloads are inert data. |
+| **Audit trail** | Every attempt — executed, denied, or dry-run — appends to `memory/harness-audit.jsonl`. |
+
+Verified by `python scripts/test_harness.py` → **25 tests**, including one that grants
+`local-model` full capabilities and asserts the whole harness then fails closed.
+Full documentation and threat model: [`docs/harness.md`](docs/harness.md).
 
 ## The local coder (offline & free)
 
@@ -86,12 +115,13 @@ alfred "add input validation to this function"
 | `AGENTS.md` | Top-level governance (mission, org chart, safety) |
 | `.kiro/agents/` | Agent configurations |
 | `.kiro/brains/` | Per-agent cognition (identity, memory, skills, reflexes) |
-| `.kiro/steering/` | Always-on rules (identity, safety, routing, reporting, memory, web) |
-| `.kiro/skills/` | On-demand domain expertise |
-| `scripts/` | Automation: **workflow engine**, **security tools**, **productivity tools**, local coder, memory, web, voice (TTS), fine-tune builder, CI, training |
+| `.kiro/steering/` | Always-on rules (identity, safety, resilience, token-budget, routing, memory, web) |
+| `.kiro/skills/` | On-demand domain expertise (incl. `true-leadership`, `token-economy`) |
+| `harness.cmd` · `policy/` | The policy-gated automation harness and its signed capability policy |
+| `scripts/` | Automation: **harness**, **workflow engine**, security tools, local coder, memory, web, voice (TTS), fine-tune builder, CI, training |
 | `workflows/` | Declarative multi-agent DAG workflow specs (run by `scripts/workflow.py`) |
 | `evals/` | Eval datasets + rubrics |
-| `docs/` | Setup and workflow guides |
+| `docs/` | Setup and workflow guides (incl. [`harness.md`](docs/harness.md)) |
 | `notebooks/` | Fine-tune notebook |
 
 > Personal data — the memory trail, fine-tune datasets, eval outputs, and secrets — is kept **local-only** and git-ignored by design.
