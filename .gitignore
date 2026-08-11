@@ -71,3 +71,11 @@ deploy/hf-space/
 # Cloudflare Wrangler local state (build/deploy cache; can hold OAuth tokens - never commit)
 .wrangler/
 deploy/cloudflare/.wrangler/
+
+# Harness (added with the harness)
+secrets/harness.key
+secrets/harness-callers.json
+policy/harness-policy.sig
+memory/harness-audit.jsonl
+backups/
+tmp/
