@@ -1,0 +1,70 @@
+{
+  "schema": "gauntlet/v1",
+  "name": "feature-gated",
+  "description": "Implement a feature behind explicit gates. The gate decides where control goes; the engine forbids a third identical retry, so a stuck approach is replaced rather than repeated.",
+  "budget": {
+    "maxNodeRuns": 20,
+    "maxUsdEstimate": 2.0
+  },
+  "nodes": [
+    {
+      "name": "plan",
+      "kind": "work",
+      "agent": "alfred-planner",
+      "task": "Break the objective into ordered, testable tasks with dependencies."
+    },
+    {
+      "name": "implement",
+      "kind": "work",
+      "agent": "alfred-coder",
+      "depends_on": ["plan"],
+      "task": "Implement the planned change. Match existing style and add tests.",
+      "compensate": "git-status"
+    },
+    {
+      "name": "test",
+      "kind": "work",
+      "agent": "alfred-tester",
+      "depends_on": ["implement"],
+      "task": "Run the project's build and tests. Report exit codes and failures verbatim."
+    },
+    {
+      "name": "quality-gate",
+      "kind": "gate",
+      "agent": "alfred-reviewer",
+      "depends_on": ["test"],
+      "criteria": "The build passes, tests pass with evidence (exit codes quoted), the change matches project conventions, and nothing security-sensitive was touched without review. PASS requires citable evidence, not an assurance.",
+      "on": {
+        "PASS": "document",
+        "RETRY": "fix",
+        "REROUTE": "replan",
+        "ESCALATE": "deep-review"
+      }
+    },
+    {
+      "name": "fix",
+      "kind": "work",
+      "agent": "alfred-debugger",
+      "task": "Diagnose the root cause of the reported failure and fix the cause, not the symptom."
+    },
+    {
+      "name": "replan",
+      "kind": "work",
+      "agent": "alfred-architect",
+      "task": "The current approach failed repeatedly. Choose a materially different approach and say why it avoids the previous failure."
+    },
+    {
+      "name": "deep-review",
+      "kind": "work",
+      "agent": "alfred-security",
+      "task": "This needs stronger judgement than the gate could apply. Review thoroughly and report severity-ranked findings."
+    },
+    {
+      "name": "document",
+      "kind": "work",
+      "agent": "alfred-docs",
+      "depends_on": ["quality-gate"],
+      "task": "Document what changed and how it was verified. Match existing documentation conventions."
+    }
+  ]
+}
