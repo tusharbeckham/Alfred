@@ -339,18 +339,125 @@ tools require a Business/Enterprise plan with Notion AI, so the graph must read 
 Each phase is independently shippable, leaves every suite green, and is additive — the current
 loop engine keeps working until the graph engine provably beats it.
 
-| Phase | Scope | Done when |
+| Phase | Scope | Done when | Status |
+|---|---|---|---|
+| **1. Verdict protocol** | `gauntlet/v1` schema; `Verdict` type; gate-node contract; spec validator accepting both old `loop_to` and new gates | Round-trip tests; every existing `workflows/*.json` still validates | ✅ **done** — `scripts/gauntlet.py`, 99 tests in `test_gauntlet.py`; legacy specs pass through untouched |
+| **2. Gate routing + attempt ledger** | Verdict-driven router; ledger keyed by `(node, reason_code)`; **`RETRY` forbidden twice on the same reason → forced `REROUTE`** | Test: a stage failing identically twice reroutes instead of retrying a third time | ✅ **done** — plus two rungs the plan missed (see below) |
+| **3. Durable checkpoints** | SQLite checkpoint per superstep; `--resume <run_id>`; TTL pruning | Test: kill a run mid-wave, resume, assert completed nodes are **not** re-executed | ✅ **done** — `Checkpointer` in its own `memory/gauntlet-runs.db`; state written after every node; `--resume`; TTL `prune` that **keeps unfinished runs**. Verified: a crashed run resumes and re-runs only the crashed node |
+| **4. No-progress detector** | Artifact-hash comparison per node → `REROUTE` on repeat | Test: a node returning identical output twice is rerouted, not retried | ✅ **done** — `ProgressTracker`; repeat status captured at observe time |
+| **5. Compensation** | `compensate:` on mutating nodes; reverse-order rollback on `ABORT`; compensators must be harness capabilities | Test: a failed mutating run leaves the tree clean; a non-capability compensator is rejected at validate time | ✅ **done** — reverse-order rollback, validate-time capability check, and `harness_compensator()` which invokes rollback **through the signed policy** so an undo inherits deny-by-default, argv-only execution and the audit trail. `compensateParams` supplies required params. Verified: `local-model` cannot roll back |
+| **6. Memory graph core** | New SQLite tables; `sqlite-vec`; bi-temporal facts; backfill from `memory.jsonl`; `graph-recall` capability | Test: contradicting a fact invalidates the old edge and keeps history; recall returns the current fact | ✅ **done** — `scripts/memgraph.py`, 59 tests. Additive `mg_*` tables in `megamind.db`; 52 facts backfilled; 5 policy-gated capabilities. **`sqlite-vec` deliberately not adopted** (see below) |
+| **7. Hybrid retrieval** | BM25 + vector + bounded traversal, RRF, cheap rerankers, hard token budget | Test: retrieval never exceeds the token budget; ranking beats FTS-only on a fixture set | 🟨 **done except reranking** — FTS5 BM25 + cosine + depth-capped recursive-CTE traversal, RRF-fused, hard token budget. Episode-mention / node-distance rerankers not implemented; RRF alone is sufficient at 54 facts |
+| **8. Ultron bridge** | `gauntlet/v1` in Ultron; `ultron-pipeline` harness capability (gated) | Test: one spec file runs on both engines with equivalent stage outcomes | ✅ **done** — `src/gauntlet.mjs` mirrors the router and validator (56 tests); `scripts/test_ultron_parity.py` drives Ultron from Alfred and asserts both engines agree on **every shipped spec** and on the **whole routing ladder** (13 tests). `ultron-pipeline` is gated; `ultron-gauntlet-check` is the read path. `local-model` gets neither |
+| **9. Notion graph I/O** | Source/sink nodes; human-approval gate via `interrupt` + resume | Test with a stub MCP server; live test needs the Owner's account | 🟨 **approval gates done, Notion I/O not** — `kind: approval` parks the run and checkpoints; resume with `--approve <node>` continues without re-running finished work. Parked runs surface in the dashboard's Approvals tab. The Notion *transport* (posting the request, reading the checkbox) is still to do |
+| **10. Hygiene + consolidation** | Dedup, contradiction, decay, deterministic consolidation | Test: dedup merges, decay preserves high-value facts under a storage cap | ⬜ not started |
+
+### Correction to §3.3 — `sqlite-vec` deferred, not adopted
+
+The plan chose `sqlite-vec`. Implementation revealed it is **not installed** here, and
+adding it would make the memory graph depend on a pip install to answer *any*
+question. That is the wrong trade for this system: LM Studio is frequently offline,
+so vectors are frequently absent anyway, and a memory system that needs a package
+to recall is not a memory system.
+
+Built instead on **pure stdlib**: FTS5 BM25 + cosine over float32 BLOBs + a
+depth-capped recursive CTE, fused with RRF. Vectors are optional; with none stored,
+keyword and traversal still answer. Embeddings are packed **little-endian float32,
+which is `sqlite-vec`'s own blob layout**, so the extension can be added later as a
+pure accelerator with no schema change and no re-embedding.
+
+Two design corrections found by tests rather than review:
+
+1. **Entity identity must be the name alone.** The first schema used
+   `UNIQUE(name, kind)`, which fragmented identity: `sqlite` mentioned as a *tool*
+   and `sqlite` mentioned as a *concept* became two unrelated nodes, and graph
+   traversal silently broke at the join. `kind` is now a refinable label — a
+   specific kind upgrades a placeholder, never splits the entity.
+2. **Recall must not report "nothing relevant" when matches exist but exceed the
+   token budget.** That reads as "no memory" and is a different, misleading answer.
+   Recall now returns the best match *clipped*, and reports `candidates` separately
+   from returned facts so a caller can tell "nothing known" from "too much known".
+
+### Verified behaviour
+
+```
+memgraph assert --subject owner --predicate prefers-coder --object "local qwen model"   -> fact 53
+memgraph assert --subject owner --predicate prefers-coder --object "deepseek flash"     -> fact 54, invalidated [53]
+memgraph current --subject owner --predicate prefers-coder   -> deepseek flash only
+memgraph history --subject owner --predicate prefers-coder   -> both, 53 has t_invalid + superseded_by=54
+```
+
+Recall on "which coder model does the owner prefer" returns the DeepSeek preference
+and **not** the superseded Qwen one — the stale-preference bug this layer exists to
+fix. Every returned fact cites its episode (`[ep:54]`); `graph-doctor` asserts no
+fact lacks provenance.
+
+### Correction to §2.2 — the attempt ledger had a hole a model could walk through
+
+The ledger keys on `(node, reason_code)`. Every bound built on it — retries,
+reroutes, escalations — therefore assumes reason codes are a **stable vocabulary**.
+They are not, when a real model is writing them.
+
+Measured on a live 7B gate against `feature-gated.json`, with a gate that reported
+the same underlying failure under a new label each time:
+
+| | before the fix | after |
 |---|---|---|
-| **1. Verdict protocol** | `gauntlet/v1` schema; `Verdict` type; gate-node contract; spec validator accepting both old `loop_to` and new gates | Round-trip tests; every existing `workflows/*.json` still validates |
-| **2. Gate routing + attempt ledger** | Verdict-driven router; ledger keyed by `(node, reason_code)`; **`RETRY` forbidden twice on the same reason → forced `REROUTE`** | Test: a stage failing identically twice reroutes instead of retrying a third time |
-| **3. Durable checkpoints** | SQLite checkpoint per superstep; `--resume <run_id>`; TTL pruning | Test: kill a run mid-wave, resume, assert completed nodes are **not** re-executed |
-| **4. No-progress detector** | Artifact-hash comparison per node → `REROUTE` on repeat | Test: a node returning identical output twice is rerouted, not retried |
-| **5. Compensation** | `compensate:` on mutating nodes; reverse-order rollback on `ABORT`; compensators must be harness capabilities | Test: a failed mutating run leaves the tree clean; a non-capability compensator is rejected at validate time |
-| **6. Memory graph core** | New SQLite tables; `sqlite-vec`; bi-temporal facts; backfill from `memory.jsonl`; `graph-recall` capability | Test: contradicting a fact invalidates the old edge and keeps history; recall returns the current fact |
-| **7. Hybrid retrieval** | BM25 + vector + bounded traversal, RRF, cheap rerankers, hard token budget | Test: retrieval never exceeds the token budget; ranking beats FTS-only on a fixture set |
-| **8. Ultron bridge** | `gauntlet/v1` in Ultron; `ultron-pipeline` harness capability (gated) | Test: one spec file runs on both engines with equivalent stage outcomes |
-| **9. Notion graph I/O** | Source/sink nodes; human-approval gate via `interrupt` + resume | Test with a stub MCP server; live test needs the Owner's account |
-| **10. Hygiene + consolidation** | Dedup, contradiction, decay, deterministic consolidation | Test: dedup merges, decay preserves high-value facts under a storage cap |
+| node runs | **40** (budget cap) | **14** |
+| forced reroutes | **0** | **4** |
+| distinct reason codes | 19 | 1 |
+| outcome | `budget_exhausted` | clean `aborted` |
+
+Zero forced reroutes. The anti-thrash guarantee — the headline safety property of
+this engine, documented and claimed for several iterations — was **fully defeated by
+renaming**. Every retry looked novel, so no counter ever reached its threshold.
+
+Two independent defences now exist, because one of them is a heuristic:
+
+1. **`MAX_GATE_REJECTIONS = 4`** — a code-**independent** cap on how many times one
+   gate may reject before the ladder is forced, whatever it calls the failures.
+   This cannot be defeated by relabelling, because it does not look at labels.
+2. **A controlled vocabulary.** `DEFAULT_REASON_CODES` is listed in the gate prompt,
+   and any code outside the declared set is folded into `OTHER` (keeping the original
+   label as `detail`, so nothing is hidden from a human). Folding makes repeated
+   failures converge on one counter again. A gate node may declare its own
+   `reasonCodes`.
+
+Mirrored in `src/gauntlet.mjs` and asserted by `test_ultron_parity.py`, so the bound
+cannot drift between engines.
+
+**The general lesson**, which applies to anything that parses model output: a
+guarantee keyed on a value the model chooses is not a guarantee. Bound the thing the
+model does not control — here, the number of attempts.
+
+### Correction to §2.1 — the ladder needed two more rungs
+
+Implementing phase 2 exposed a hole in this plan's own design. Forcing `REROUTE`
+after two identical `RETRY`s stops retry-thrash, but nothing stopped **reroute
+thrash**: the engine swapped between two failing approaches forever until the
+budget died. Worse, once it escalated it thrashed on the *most expensive tier*.
+
+Verified against the real spec: the ladder is now bounded at every rung.
+
+```
+RETRY x2  ->  REROUTE x2  ->  ESCALATE x1  ->  ABORT (partial result + reason)
+ fix, fix     replan, replan   deep-review     stop, honestly
+```
+
+Measured on `workflows/feature-gated.json` with a permanently failing gate:
+**14 node runs then a clean abort**, versus spinning to the 60-run budget cap
+before. Constants: `MAX_SAME_REASON_RETRIES=2`, `MAX_SAME_REASON_REROUTES=2`,
+`MAX_SAME_REASON_ESCALATIONS=1` — escalation is capped hardest because it is the
+rung that spends premium credits.
+
+Two implementation traps worth recording, both caught by tests rather than review:
+
+1. **The ledger must be keyed by the gate**, not by the node being judged —
+   `route()` looks up by gate name, so keying by the judged node silently
+   disabled the anti-thrash rule while appearing to work.
+2. **Work dispatched by a gate must return through that gate.** Without an
+   explicit return edge, control fell through in linear order, each gate was
+   evaluated exactly once, and no thrash rule could ever engage.
 
 **Sequencing note:** phases 1–5 are the execution graph, 6–7 the memory graph, 8–10 the
 integration. 1–5 deliver value without any of 6–10, so if the plan stalls, it stalls having
