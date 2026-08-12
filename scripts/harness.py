@@ -86,8 +86,28 @@ def load_key() -> bytes | None:
     return key or None
 
 
+def canonical_policy_bytes(policy_bytes: bytes) -> bytes:
+    """Canonicalize the policy bytes before signing/verifying.
+
+    The signature must survive a git checkout. On Windows with core.autocrlf=true,
+    git rewrites LF to CRLF on checkout, which changes the raw bytes and would
+    invalidate an HMAC taken over them - bricking the whole harness on a fresh
+    clone even though the policy content is authentic and unmodified.
+
+    We therefore normalize line endings (CRLF and lone CR both -> LF) before
+    hashing. This is safe: line endings carry no semantic meaning in JSON, so an
+    attacker cannot change what the policy *means* via line endings alone. Every
+    semantic byte is still covered by the HMAC.
+
+    Deliberately NOT stripping trailing whitespace/newlines: keeping the
+    canonical form minimal means signatures generated before this fix still
+    verify, so the existing policy is proven authentic without re-signing.
+    """
+    return policy_bytes.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def compute_signature(policy_bytes: bytes, key: bytes) -> str:
-    return hmac.new(key, policy_bytes, hashlib.sha256).hexdigest()
+    return hmac.new(key, canonical_policy_bytes(policy_bytes), hashlib.sha256).hexdigest()
 
 
 def verify_policy(*, require_signature: bool = True) -> dict[str, Any]:
@@ -308,27 +328,75 @@ def run_capability(
     raw_params: dict[str, str],
     approve: bool,
     dry_run: bool,
+    observer=None,
 ) -> Result:
-    caller_spec = resolve_caller(policy, caller)
-    authenticate(caller, token, caller_spec)
+    """Run a capability through every policy control, in order.
+
+    ``observer`` is an optional callback ``(stage, ok, detail)`` fired as each
+    control passes. Every stage below is a REAL check that can refuse the call -
+    nothing is emitted for decoration, so a UI rendering these is showing the
+    actual policy chain rather than a progress animation.
+    """
+    def stage(name: str, ok: bool = True, detail: str = "") -> None:
+        if observer is not None:
+            try:
+                observer(name, ok, detail)
+            except Exception:  # noqa: BLE001 - a display must never break the policy
+                pass
+
+    try:
+        caller_spec = resolve_caller(policy, caller)
+    except Denied:
+        stage("caller", False, f"unknown caller '{caller}'")
+        raise
+    stage("caller", True, f"{caller} (trust={caller_spec.get('trust')})")
+
+    try:
+        authenticate(caller, token, caller_spec)
+    except Denied as exc:
+        stage("auth", False, str(exc)[:80])
+        raise
+    stage("auth", True, "token required" if caller_spec.get("authRequired") else "not required")
 
     spec = policy.get("capabilities", {}).get(capability)
     if spec is None:
+        stage("defined", False, "not in policy (deny by default)")
         raise Denied(f"Capability '{capability}' is not defined in the policy (deny by default).")
+    stage("defined", True, f"risk={spec.get('risk')}")
+
     if capability not in allowed_capabilities(policy, caller_spec):
+        stage("allowlist", False, f"'{caller}' may not run '{capability}'")
         raise Denied(f"Caller '{caller}' is not permitted to run '{capability}'.")
+    stage("allowlist", True, "permitted for this caller")
+
     if spec.get("gated", False):
         if caller_spec.get("trust") != "high":
+            stage("gate", False, f"gated; trust={caller_spec.get('trust')} is too low")
             raise Denied(
                 f"'{capability}' is a gated capability and requires a high-trust caller; "
                 f"'{caller}' is trust={caller_spec.get('trust')}."
             )
         if not approve:
+            stage("gate", False, "gated; needs explicit --approve")
             raise Denied(f"'{capability}' is gated. Re-run with --approve to confirm.")
+        stage("gate", True, "gated, approved by the Owner")
+    else:
+        stage("gate", True, "ungated")
 
-    params = validate_params(capability, spec.get("params", {}), raw_params, policy)
-    argv = build_argv(spec, params)
-    scan_forbidden(argv, policy)
+    try:
+        params = validate_params(capability, spec.get("params", {}), raw_params, policy)
+    except (BadInput, Denied) as exc:
+        stage("params", False, str(exc)[:80])
+        raise
+    stage("params", True, f"{len(params)} validated" if params else "none required")
+
+    try:
+        argv = build_argv(spec, params)
+        scan_forbidden(argv, policy)
+    except (BadInput, Denied) as exc:
+        stage("argv", False, str(exc)[:80])
+        raise
+    stage("argv", True, f"{len(argv)} args, no shell")
 
     timeout = int(policy.get("settings", {}).get("maxRuntimeSeconds", 900))
     base = {
@@ -344,10 +412,15 @@ def run_capability(
 
     if dry_run:
         audit(policy, {**base, "decision": "dry-run"})
+        stage("execute", True, "dry-run: nothing executed")
+        stage("audit", True, "appended")
         return Result(True, 0, json.dumps({"dryRun": True, "argv": argv}, indent=2), "", argv)
 
+    stage("execute", True, "running")
     result = execute(argv, timeout)
+    stage("execute", result.ok, f"exit {result.exit_code}")
     audit(policy, {**base, "decision": "executed", "exitCode": result.exit_code, "ok": result.ok})
+    stage("audit", True, "appended to the trail")
     return result
 
 
@@ -385,6 +458,20 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
+
+    # Branding, but only when a human is watching. `verify` and `list` emit JSON
+    # that callers (and the test suite) parse, so a banner on stdout would corrupt
+    # it - hence stderr, and only when stdout is a TTY.
+    if sys.stdout.isatty() and args.command in ("verify", "list"):
+        try:
+            sys.path.insert(0, str(ROOT / "scripts"))
+            import brand
+
+            print(f"{brand.CYAN}{brand.BOLD}ALFRED{brand.RESET}"
+                  f"{brand.DIM} harness | policy-gated automation{brand.RESET}",
+                  file=sys.stderr)
+        except Exception:  # noqa: BLE001 - branding must never break the harness
+            pass
 
     try:
         if args.command == "sign":

@@ -1,0 +1,32 @@
+# Alfred - line-ending policy
+#
+# Why this file exists: the harness policy is integrity-protected by an HMAC over
+# its bytes. With core.autocrlf=true (the Windows default), git rewrote LF to CRLF
+# on checkout, the signature stopped verifying, and the harness fail-closed on
+# EVERYTHING. The signature is now line-ending invariant (see canonical_policy_bytes
+# in scripts/harness.py) AND we stop the churn at the source here.
+
+# Default: let git normalize text in the repo, checkout native.
+* text=auto
+
+# Integrity-critical: never touch these bytes. Signed or hash-verified.
+policy/*.json   -text
+policy/*.sig    -text
+secrets/*       -text
+
+# Keep LF for anything executed by a shell/interpreter that cares.
+*.py            text eol=lf
+*.sh            text eol=lf
+*.mjs           text eol=lf
+*.js            text eol=lf
+
+# Windows-native scripts keep CRLF.
+*.ps1           text eol=crlf
+*.cmd           text eol=crlf
+*.bat           text eol=crlf
+
+# Data/append-only logs: leave bytes alone.
+*.jsonl         -text
+*.db            binary
+*.gguf          binary
+*.onnx          binary
