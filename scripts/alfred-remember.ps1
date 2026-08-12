@@ -46,8 +46,21 @@ if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Ou
 ($entry | ConvertTo-Json -Depth 6 -Compress) | Add-Content -LiteralPath $Store -Encoding UTF8
 
 # Dual-write to the fast local SQLite megamind (best-effort) so FTS recall stays in sync, offline.
-try {
-  python "$PSScriptRoot\megamind.py" add -T $Type -o $Topic -x $Text -g (@($Tags) -join ',') 2>&1 | Out-Null
-} catch { Write-Warning "megamind.db sync skipped ($($_.Exception.Message))." }
+# Build the argument list explicitly: an empty -g value gets dropped by PowerShell's native-command
+# argument handling, which made argparse fail and silently skipped every sync.
+$mmArgs = @("$PSScriptRoot\megamind.py", 'add', '-T', $Type, '-o', $Topic, '-x', $Text)
+$tagList = (@($Tags) | Where-Object { $_ }) -join ','
+if ($tagList) { $mmArgs += @('-g', $tagList) }
 
-Write-Output ("remembered [{0}] {1}  (embedding dims={2}; synced to megamind.db)" -f $Type, $Topic, $emb.Count)
+$mmSynced = $false
+try {
+  $mmOut = & python @mmArgs 2>&1
+  if ($LASTEXITCODE -eq 0) {
+    $mmSynced = $true
+  } else {
+    Write-Warning "megamind.db sync FAILED (exit $LASTEXITCODE): $($mmOut -join ' ')"
+  }
+} catch { Write-Warning "megamind.db sync FAILED ($($_.Exception.Message))." }
+
+$syncNote = if ($mmSynced) { 'synced to megamind.db' } else { 'NOT synced to megamind.db' }
+Write-Output ("remembered [{0}] {1}  (embedding dims={2}; {3})" -f $Type, $Topic, $emb.Count, $syncNote)
