@@ -7,51 +7,543 @@
     "auditLog": "memory/harness-audit.jsonl",
     "maxRuntimeSeconds": 900,
     "workspaceRoot": "C:/Alfred",
-    "allowedWorkspaceRoots": ["C:/Alfred", "C:/projects"]
+    "allowedWorkspaceRoots": [
+      "C:/Alfred",
+      "C:/projects"
+    ]
   },
   "callers": {
     "owner": {
       "description": "The Owner at an interactive terminal. Highest trust.",
       "trust": "high",
       "authRequired": false,
-      "capabilities": ["*"]
+      "capabilities": [
+        "*"
+      ]
     },
     "kiro-agent": {
       "description": "A Kiro/Claude agent running under C:/Alfred steering. Trusted for read + project work.",
       "trust": "medium",
       "authRequired": false,
-      "capabilities": ["status", "doctor", "recall", "remember", "web-search", "index", "test", "lint", "ci", "workflow-plan", "git-status", "disk-report", "process-report"]
+      "capabilities": [
+        "status",
+        "doctor",
+        "recall",
+        "remember",
+        "web-search",
+        "index",
+        "test",
+        "lint",
+        "ci",
+        "workflow-plan",
+        "git-status",
+        "disk-report",
+        "process-report",
+        "graph-recall",
+        "graph-current",
+        "graph-history",
+        "graph-assert",
+        "graph-doctor",
+        "ultron-pipeline",
+        "ultron-gauntlet-check"
+      ]
     },
     "local-model": {
       "description": "An untrusted LOCAL model (LM Studio / Ollama / any local weights). Read-only diagnostics ONLY. Cannot mutate the machine, cannot reach the network, cannot run tests that execute repo code.",
       "trust": "untrusted",
       "authRequired": true,
-      "capabilities": ["status", "recall", "git-status", "disk-report", "process-report"]
+      "capabilities": [
+        "status",
+        "recall",
+        "git-status",
+        "disk-report",
+        "process-report",
+        "graph-recall",
+        "graph-current",
+        "graph-history"
+      ]
     },
     "scheduled": {
       "description": "Unattended/overnight runs. Project-scoped work only; every gated capability is refused and queued for approval.",
       "trust": "low",
       "authRequired": true,
-      "capabilities": ["status", "doctor", "recall", "remember", "index", "test", "lint", "ci", "workflow-plan", "git-status", "disk-report"]
+      "capabilities": [
+        "status",
+        "doctor",
+        "recall",
+        "remember",
+        "index",
+        "test",
+        "lint",
+        "ci",
+        "workflow-plan",
+        "git-status",
+        "disk-report",
+        "graph-recall",
+        "graph-doctor",
+        "ultron-gauntlet-check"
+      ]
     }
   },
   "capabilities": {
-    "status": { "risk": "read", "description": "Alfred system status report", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-status.ps1"], "gated": false },
-    "doctor": { "risk": "read", "description": "Environment/health check", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-doctor.ps1"], "gated": false },
-    "recall": { "risk": "read", "description": "Query the megamind memory index", "command": "python", "args": ["scripts/megamind.py", "recall", "-q", "{query}", "-k", "5"], "gated": false, "params": { "query": { "type": "string", "maxLength": 300 } } },
-    "remember": { "risk": "write-memory", "description": "Append a memory entry", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-remember.ps1", "-Type", "{type}", "-Topic", "{topic}", "-Text", "{text}"], "gated": false, "params": { "type": { "type": "enum", "values": ["decision", "learning", "fact", "preference", "outcome"] }, "topic": { "type": "string", "maxLength": 120 }, "text": { "type": "string", "maxLength": 2000 } } },
-    "web-search": { "risk": "network-read", "description": "Keyless web search", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/alfred-web.ps1", "-Search", "{query}", "-Max", "5"], "gated": false, "params": { "query": { "type": "string", "maxLength": 300 } } },
-    "index": { "risk": "read", "description": "Index a project directory", "command": "node", "args": ["C:/projects/ultron-cli/bin/ultron.mjs", "index", "{path}"], "gated": false, "params": { "path": { "type": "path", "mustBeInsideWorkspace": true } } },
-    "git-status": { "risk": "read", "description": "Git status of a repo", "command": "git", "args": ["-C", "{path}", "status", "--porcelain=v1", "--branch"], "gated": false, "params": { "path": { "type": "path", "mustBeInsideWorkspace": true } } },
-    "disk-report": { "risk": "read", "description": "Disk free space", "command": "powershell", "args": ["-NoProfile", "-Command", "Get-PSDrive -PSProvider FileSystem | Select-Object Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}},@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}} | ConvertTo-Json"], "gated": false },
-    "process-report": { "risk": "read", "description": "Top processes by memory", "command": "powershell", "args": ["-NoProfile", "-Command", "Get-Process | Sort-Object WS -Descending | Select-Object -First 15 Name,Id,@{n='MemMB';e={[math]::Round($_.WS/1MB,1)}} | ConvertTo-Json"], "gated": false },
-    "test": { "risk": "execute-project-code", "description": "Run the Alfred python test suite", "command": "python", "args": ["scripts/test_workflow.py"], "gated": false },
-    "lint": { "risk": "read", "description": "Safety-lint the scripts", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/safety-lint.ps1"], "gated": false },
-    "ci": { "risk": "execute-project-code", "description": "Run the CI gate", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/ci-run.ps1"], "gated": false },
-    "workflow-plan": { "risk": "read", "description": "Preview a workflow DAG without spawning agents", "command": "python", "args": ["scripts/workflow.py", "plan", "workflows/{workflow}.json"], "gated": false, "params": { "workflow": { "type": "enum", "values": ["feature", "bugfix", "refactor", "research", "audit", "release"] } } },
-    "workflow-run": { "risk": "spawn-agents", "description": "Execute a workflow DAG for real (spends credits)", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/workflow-run.ps1", "-Workflow", "{workflow}", "-Task", "{task}", "-Execute"], "gated": true, "params": { "workflow": { "type": "enum", "values": ["feature", "bugfix", "refactor", "research", "audit", "release"] }, "task": { "type": "string", "maxLength": 500 } } },
-    "backup": { "risk": "write-disk", "description": "Copy the Alfred config tree to a timestamped backup folder", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/harness-backup.ps1"], "gated": true },
-    "git-commit": { "risk": "write-vcs", "description": "Stage specific files and commit (never pushes)", "command": "powershell", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/harness-commit.ps1", "-Message", "{message}"], "gated": true, "params": { "message": { "type": "string", "maxLength": 300 } } }
+    "status": {
+      "risk": "read",
+      "description": "Alfred system status report",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/alfred-status.ps1"
+      ],
+      "gated": false
+    },
+    "doctor": {
+      "risk": "read",
+      "description": "Environment/health check",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/alfred-doctor.ps1"
+      ],
+      "gated": false
+    },
+    "recall": {
+      "risk": "read",
+      "description": "Query the megamind memory index",
+      "command": "python",
+      "args": [
+        "scripts/megamind.py",
+        "recall",
+        "-q",
+        "{query}",
+        "-k",
+        "5"
+      ],
+      "gated": false,
+      "params": {
+        "query": {
+          "type": "string",
+          "maxLength": 300
+        }
+      }
+    },
+    "remember": {
+      "risk": "write-memory",
+      "description": "Append a memory entry",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/alfred-remember.ps1",
+        "-Type",
+        "{type}",
+        "-Topic",
+        "{topic}",
+        "-Text",
+        "{text}"
+      ],
+      "gated": false,
+      "params": {
+        "type": {
+          "type": "enum",
+          "values": [
+            "decision",
+            "learning",
+            "fact",
+            "preference",
+            "outcome"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "web-search": {
+      "risk": "network-read",
+      "description": "Keyless web search",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/alfred-web.ps1",
+        "-Search",
+        "{query}",
+        "-Max",
+        "5"
+      ],
+      "gated": false,
+      "params": {
+        "query": {
+          "type": "string",
+          "maxLength": 300
+        }
+      }
+    },
+    "index": {
+      "risk": "read",
+      "description": "Index a project directory",
+      "command": "node",
+      "args": [
+        "C:/projects/ultron-cli/bin/ultron.mjs",
+        "index",
+        "{path}"
+      ],
+      "gated": false,
+      "params": {
+        "path": {
+          "type": "path",
+          "mustBeInsideWorkspace": true
+        }
+      }
+    },
+    "git-status": {
+      "risk": "read",
+      "description": "Git status of a repo",
+      "command": "git",
+      "args": [
+        "-C",
+        "{path}",
+        "status",
+        "--porcelain=v1",
+        "--branch"
+      ],
+      "gated": false,
+      "params": {
+        "path": {
+          "type": "path",
+          "mustBeInsideWorkspace": true
+        }
+      }
+    },
+    "disk-report": {
+      "risk": "read",
+      "description": "Disk free space",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Get-PSDrive -PSProvider FileSystem | Select-Object Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}},@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}} | ConvertTo-Json"
+      ],
+      "gated": false
+    },
+    "process-report": {
+      "risk": "read",
+      "description": "Top processes by memory",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Get-Process | Sort-Object WS -Descending | Select-Object -First 15 Name,Id,@{n='MemMB';e={[math]::Round($_.WS/1MB,1)}} | ConvertTo-Json"
+      ],
+      "gated": false
+    },
+    "test": {
+      "risk": "execute-project-code",
+      "description": "Run the Alfred python test suite",
+      "command": "python",
+      "args": [
+        "scripts/test_workflow.py"
+      ],
+      "gated": false
+    },
+    "lint": {
+      "risk": "read",
+      "description": "Safety-lint the scripts",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/safety-lint.ps1"
+      ],
+      "gated": false
+    },
+    "ci": {
+      "risk": "execute-project-code",
+      "description": "Run the CI gate",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/ci-run.ps1"
+      ],
+      "gated": false
+    },
+    "workflow-plan": {
+      "risk": "read",
+      "description": "Preview a workflow DAG without spawning agents",
+      "command": "python",
+      "args": [
+        "scripts/workflow.py",
+        "plan",
+        "workflows/{workflow}.json"
+      ],
+      "gated": false,
+      "params": {
+        "workflow": {
+          "type": "enum",
+          "values": [
+            "feature",
+            "bugfix",
+            "refactor",
+            "research",
+            "audit",
+            "release"
+          ]
+        }
+      }
+    },
+    "workflow-run": {
+      "risk": "spawn-agents",
+      "description": "Execute a workflow DAG for real (spends credits)",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/workflow-run.ps1",
+        "-Workflow",
+        "{workflow}",
+        "-Task",
+        "{task}",
+        "-Execute"
+      ],
+      "gated": true,
+      "params": {
+        "workflow": {
+          "type": "enum",
+          "values": [
+            "feature",
+            "bugfix",
+            "refactor",
+            "research",
+            "audit",
+            "release"
+          ]
+        },
+        "task": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "backup": {
+      "risk": "write-disk",
+      "description": "Copy the Alfred config tree to a timestamped backup folder",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/harness-backup.ps1"
+      ],
+      "gated": true
+    },
+    "git-commit": {
+      "risk": "write-vcs",
+      "description": "Stage specific files and commit (never pushes)",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/harness-commit.ps1",
+        "-Message",
+        "{message}"
+      ],
+      "gated": true,
+      "params": {
+        "message": {
+          "type": "string",
+          "maxLength": 300
+        }
+      }
+    },
+    "graph-recall": {
+      "risk": "read",
+      "description": "Hybrid, token-bounded recall from the bi-temporal memory graph (current truth only)",
+      "command": "python",
+      "args": [
+        "scripts/memgraph.py",
+        "recall",
+        "-q",
+        "{query}",
+        "-k",
+        "6",
+        "--max-tokens",
+        "400"
+      ],
+      "gated": false,
+      "params": {
+        "query": {
+          "type": "string",
+          "maxLength": 300
+        }
+      }
+    },
+    "graph-current": {
+      "risk": "read",
+      "description": "What the memory graph holds as true right now for a subject",
+      "command": "python",
+      "args": [
+        "scripts/memgraph.py",
+        "current",
+        "--subject",
+        "{subject}"
+      ],
+      "gated": false,
+      "params": {
+        "subject": {
+          "type": "string",
+          "maxLength": 120
+        }
+      }
+    },
+    "graph-history": {
+      "risk": "read",
+      "description": "Every version of a fact - what changed and when",
+      "command": "python",
+      "args": [
+        "scripts/memgraph.py",
+        "history",
+        "--subject",
+        "{subject}",
+        "--predicate",
+        "{predicate}"
+      ],
+      "gated": false,
+      "params": {
+        "subject": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "predicate": {
+          "type": "string",
+          "maxLength": 120
+        }
+      }
+    },
+    "graph-assert": {
+      "risk": "write-memory",
+      "description": "Assert a fact, invalidating whatever it contradicts (history preserved)",
+      "command": "python",
+      "args": [
+        "scripts/memgraph.py",
+        "assert",
+        "--subject",
+        "{subject}",
+        "--predicate",
+        "{predicate}",
+        "--object",
+        "{object}",
+        "--kind",
+        "{kind}",
+        "--statement",
+        "{statement}"
+      ],
+      "gated": false,
+      "params": {
+        "subject": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "predicate": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "object": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "kind": {
+          "type": "enum",
+          "values": [
+            "fact",
+            "decision",
+            "preference",
+            "outcome",
+            "learning"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "graph-doctor": {
+      "risk": "read",
+      "description": "Verify every fact in the memory graph cites a source episode",
+      "command": "python",
+      "args": [
+        "scripts/memgraph.py",
+        "doctor"
+      ],
+      "gated": false,
+      "params": {}
+    },
+    "ultron-pipeline": {
+      "risk": "spawn-agents",
+      "description": "Run an Ultron pipeline. Spends real money and spawns agents, so it is gated.",
+      "command": "node",
+      "args": [
+        "C:/projects/ultron-cli/bin/ultron.mjs",
+        "pipeline",
+        "run",
+        "{pipeline}",
+        "--task",
+        "{task}"
+      ],
+      "gated": true,
+      "params": {
+        "pipeline": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "task": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "ultron-gauntlet-check": {
+      "risk": "read",
+      "description": "Validate a gauntlet/v1 spec against Ultron's engine (cross-engine parity check)",
+      "command": "node",
+      "args": [
+        "C:/projects/ultron-cli/scripts/gauntlet-check.mjs",
+        "validate",
+        "{spec}"
+      ],
+      "gated": false,
+      "params": {
+        "spec": {
+          "type": "path",
+          "maxLength": 400
+        }
+      }
+    }
   },
   "forbidden": {
     "description": "Patterns that are refused for EVERY caller including the Owner, as defence in depth. The harness never builds a shell string, so these are a second line rather than the primary control.",
