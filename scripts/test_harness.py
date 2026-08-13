@@ -58,6 +58,53 @@ class PolicyIntegrity(unittest.TestCase):
             policy_path.write_bytes(original)
         self.assertEqual(run(["verify"]).returncode, EXIT_OK, "policy restored")
 
+    def test_signature_survives_crlf_line_endings(self):
+        """Regression: a git checkout on Windows must not brick the harness.
+
+        With core.autocrlf=true, git rewrites LF to CRLF on checkout. If the HMAC
+        is taken over raw bytes, the signature stops verifying and the harness
+        refuses to run ANYTHING - even though the policy content is authentic.
+        This actually happened; the signature is now line-ending invariant.
+        """
+        policy_path = ROOT / "policy" / "harness-policy.json"
+        original = policy_path.read_bytes()
+        try:
+            lf = original.replace(b"\r\n", b"\n")
+            crlf = lf.replace(b"\n", b"\r\n")
+
+            policy_path.write_bytes(lf)
+            self.assertEqual(run(["verify"]).returncode, EXIT_OK,
+                             "policy with LF endings must verify")
+
+            policy_path.write_bytes(crlf)
+            self.assertEqual(run(["verify"]).returncode, EXIT_OK,
+                             "policy with CRLF endings must verify (git checkout on Windows)")
+        finally:
+            policy_path.write_bytes(original)
+
+    def test_line_ending_normalization_does_not_mask_real_tampering(self):
+        """The CRLF fix must not weaken tamper detection.
+
+        A semantic change is still caught even when it arrives with the same
+        line-ending style the signature was generated under.
+        """
+        policy_path = ROOT / "policy" / "harness-policy.json"
+        original = policy_path.read_bytes()
+        try:
+            tampered = json.loads(original)
+            tampered["settings"]["denyByDefault"] = False
+            # Write with CRLF endings so only the *semantic* change can be detected.
+            body = json.dumps(tampered, indent=2).encode("utf-8").replace(b"\n", b"\r\n")
+            policy_path.write_bytes(body)
+
+            verify = run(["verify"])
+            self.assertEqual(verify.returncode, EXIT_POLICY,
+                             "a semantic change must still fail closed under CRLF")
+            self.assertIn("INTEGRITY FAILURE", verify.stderr)
+        finally:
+            policy_path.write_bytes(original)
+        self.assertEqual(run(["verify"]).returncode, EXIT_OK, "policy restored")
+
 
 class UntrustedLocalModelContainment(unittest.TestCase):
     """Every one of these must be refused."""

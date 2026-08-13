@@ -1,0 +1,70 @@
+{
+  "schema": "gauntlet/v1",
+  "name": "deploy-gated",
+  "description": "A change that ends in a gated action. The approval node PARKS the run and checkpoints, rather than blocking a process while it waits. The Owner decides out of band; resume continues from exactly that point without re-billing completed work.",
+  "budget": {
+    "maxNodeRuns": 24,
+    "maxUsdEstimate": 3.0
+  },
+  "nodes": [
+    {
+      "name": "build",
+      "kind": "work",
+      "agent": "alfred-coder",
+      "task": "Make the change. Match existing conventions and add tests.",
+      "compensate": "git-status"
+    },
+    {
+      "name": "verify",
+      "kind": "work",
+      "agent": "alfred-tester",
+      "depends_on": ["build"],
+      "task": "Run the build and full test suite. Quote exit codes verbatim."
+    },
+    {
+      "name": "release-gate",
+      "kind": "gate",
+      "agent": "alfred-reviewer",
+      "depends_on": ["verify"],
+      "criteria": "The build and tests pass with quoted exit codes, the change is scoped to what was asked, and nothing touches auth, secrets or infrastructure without explicit review. PASS requires citable evidence.",
+      "on": {
+        "PASS": "owner-approval",
+        "RETRY": "repair",
+        "REROUTE": "rethink",
+        "ESCALATE": "security-review"
+      }
+    },
+    {
+      "name": "repair",
+      "kind": "work",
+      "agent": "alfred-debugger",
+      "task": "Fix the root cause of the reported failure, not the symptom."
+    },
+    {
+      "name": "rethink",
+      "kind": "work",
+      "agent": "alfred-architect",
+      "task": "The approach failed repeatedly. Pick a materially different one and justify it."
+    },
+    {
+      "name": "security-review",
+      "kind": "work",
+      "agent": "alfred-security",
+      "task": "Review for vulnerabilities and report severity-ranked findings."
+    },
+    {
+      "name": "owner-approval",
+      "kind": "approval",
+      "agent": "alfred-manager",
+      "depends_on": ["release-gate"],
+      "task": "This step deploys. Per safety.md, production changes require the Owner's explicit approval. Nothing past this point runs until it is granted."
+    },
+    {
+      "name": "deploy",
+      "kind": "work",
+      "agent": "alfred-devops",
+      "depends_on": ["owner-approval"],
+      "task": "Perform the approved release steps and report what changed."
+    }
+  ]
+}
