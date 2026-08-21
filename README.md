@@ -6,8 +6,9 @@
 ![Claude](https://img.shields.io/badge/Claude-Opus%20%2F%20Sonnet-D97757?style=flat-square)
 ![Local LLM](https://img.shields.io/badge/Local-Qwen2.5--Coder%207B-615CED?style=flat-square)
 ![QLoRA](https://img.shields.io/badge/Fine--tune-QLoRA%20(free)-EE4C2C?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-515%20passing-3fb950?style=flat-square)
+[![tests](https://github.com/tusharbeckham/Alfred/actions/workflows/ci.yml/badge.svg)](https://github.com/tusharbeckham/Alfred/actions/workflows/ci.yml)
 ![Dependencies](https://img.shields.io/badge/runtime%20deps-none-3fb950?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5391FE?style=flat-square&logo=powershell&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
 ![Voice](https://img.shields.io/badge/Voice-Piper%20TTS%20(offline)-8A2BE2?style=flat-square)
@@ -286,6 +287,30 @@ Verified by `python scripts/test_dashboard.py` → **18 tests**, covering auth r
 
 ## Quick start
 
+### From a fresh clone
+
+Python 3.11+ and nothing else — no `pip install`, no npm, no cloud account, works
+offline.
+
+```powershell
+git clone https://github.com/tusharbeckham/Alfred.git
+cd Alfred
+python scripts/harness.py sign     # generate THIS clone's signing key
+alfred status                      # probe every subsystem
+Get-ChildItem scripts/test_*.py | ForEach-Object { python $_.FullName }   # 515 tests
+```
+
+Sign first, and the reason is the whole design in one command: the key that signs
+the capability policy lives in `secrets/` and is **never** committed, so a fresh
+clone has a policy and no key — and the harness fails closed, refusing to run
+anything at all until you make a key of your own. There is no shared secret to
+leak, and nothing to trust from me.
+
+`alfred status` is honest about what is missing. LM Studio, Piper and the Kiro CLI
+are all optional; every one of them degrades to a clear message instead of a crash.
+
+### With the agent layer
+
 ```powershell
 # Talk to your assistant / production manager
 kiro-cli chat --agent alfred-manager
@@ -325,6 +350,32 @@ alfred "add input validation to this function"
 | `notebooks/` | Fine-tune notebook |
 
 > Personal data — the memory trail, fine-tune datasets, eval outputs, and secrets — is kept **local-only** and git-ignored by design.
+
+---
+
+## What this is not
+
+Worth saying plainly, because the feature list above is long:
+
+- **Not a model.** Alfred is an orchestration layer over other people's models.
+  "Training" here means eval-driven prompt and skill optimization, with exactly one
+  exception: the local coder is a genuine QLoRA fine-tune of an open model.
+- **Not a product.** It is built around one person's machine, one Windows install,
+  and one set of preferences. Paths are absolute in places. It will not survive
+  first contact with your setup unread.
+- **Not audited.** The harness threat model in [`docs/harness.md`](docs/harness.md)
+  is my own reasoning, tested by 25 tests I also wrote. Read it before trusting it
+  with anything that matters.
+- **Not multi-user.** Every trust decision assumes a single Owner at the keyboard.
+
+## Contributing, security, licence
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to run it, the tests, and the house
+  rules (standard library only; fail loudly; comments explain *why*).
+- [`SECURITY.md`](SECURITY.md) — what this software can do to a machine, what is
+  deliberately absent from the repository, and how to report a vulnerability
+  privately.
+- [MIT](LICENSE).
 
 ---
 

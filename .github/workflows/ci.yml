@@ -8,10 +8,11 @@
 # No install step, deliberately. The project is standard library only, so if this
 # job ever needs `pip install`, that is the regression — not a missing dependency.
 #
-# The signed policy is not verified here and cannot be: the signing key lives in
-# secrets/, which is never committed, so a fresh clone has no key and no signature.
-# test_harness.py covers that path properly, with its own generated key — including
-# the case where a tampered policy must make the whole harness fail closed.
+# The runner signs the policy with a key it generates itself, because that is what
+# a fresh clone actually does: the signing key lives in secrets/ and is never
+# committed, so there is no shared secret to distribute. test_harness.py then
+# exercises the real enforcement path, including the case where a tampered policy
+# must make the whole harness fail closed.
 name: tests
 
 on:
@@ -39,6 +40,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Sign the policy with this runner's own key
+        # Every clone generates its own signing key — there is no shared secret in
+        # this repository, which is why secrets/ is not committed. Skip this and the
+        # harness correctly refuses to run anything, and 37 harness tests fail for
+        # exactly the right reason at exactly the wrong moment. This is also the
+        # first command a human runs after cloning.
+        shell: pwsh
+        run: |
+          python scripts/harness.py sign
+          python scripts/harness.py verify
 
       - name: Every suite
         shell: pwsh

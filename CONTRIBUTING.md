@@ -16,9 +16,15 @@ happy accident.
 ```powershell
 git clone https://github.com/tusharbeckham/Alfred.git
 cd Alfred
-python scripts/harness.py verify     # is the policy intact?
-alfred status                        # probe every subsystem
+python scripts/harness.py sign      # generate THIS clone's signing key
+python scripts/harness.py verify    # confirm the policy verifies against it
+alfred status                       # probe every subsystem
 ```
+
+The signing step is not optional and is not ceremony. The key that signs the
+capability policy lives in `secrets/`, which is never committed, so a fresh clone
+has a policy and no key — and the harness fails closed, refusing to run anything at
+all. That is the design working. Sign once and it stops.
 
 The optional pieces — LM Studio for the local model, Piper for the offline voice,
 Kiro CLI for the agent layer — are documented in `docs/`. Everything degrades
