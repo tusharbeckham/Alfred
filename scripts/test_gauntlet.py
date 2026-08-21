@@ -24,6 +24,44 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import gauntlet as g  # noqa: E402
 
 
+def _root_is_an_allowed_workspace() -> bool:
+    """Is this checkout somewhere the signed policy will let the harness operate?
+
+    Two tests below drive the real harness end to end, and the harness confines
+    every path parameter to `allowedWorkspaceRoots`. On the Owner's machine the
+    repository sits inside one of those roots and the tests run. On a CI runner it
+    does not — GitHub checks out to D:\\a\\<repo>\\<repo> — so the harness denies
+    the call, correctly, and the tests would fail for a reason that is not a defect.
+
+    Skipping is the honest outcome: the path confinement is itself covered by
+    test_harness.py, which asserts the refusal rather than depending on where the
+    clone happens to live.
+    """
+    import json
+
+    try:
+        policy = json.loads((ROOT / "policy" / "harness-policy.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return False
+
+    roots = policy.get("settings", {}).get("allowedWorkspaceRoots") or []
+    here = ROOT.resolve()
+    for root in roots:
+        try:
+            here.relative_to(Path(root).resolve())
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+ROOT_IS_AN_ALLOWED_WORKSPACE = _root_is_an_allowed_workspace()
+ROOT_OUTSIDE_REASON = (
+    "this checkout is outside the policy's allowedWorkspaceRoots, so the harness "
+    "denies path parameters here by design"
+)
+
+
 # ------------------------------------------------------------------- verdicts
 
 
@@ -802,6 +840,7 @@ class HarnessBackedCompensation(unittest.TestCase):
     def test_the_factory_returns_a_callable(self):
         self.assertTrue(callable(g.harness_compensator()))
 
+    @unittest.skipUnless(ROOT_IS_AN_ALLOWED_WORKSPACE, ROOT_OUTSIDE_REASON)
     def test_a_dry_run_rollback_succeeds_against_the_real_harness(self):
         """Uses --dry-run so nothing is actually executed, but the whole path -
         policy load, signature check, caller allowlist, parameter validation -
@@ -815,6 +854,7 @@ class HarnessBackedCompensation(unittest.TestCase):
             compensate("git-status", "build")  # git-status requires `path`
         self.assertIn("git-status", str(ctx.exception))
 
+    @unittest.skipUnless(ROOT_IS_AN_ALLOWED_WORKSPACE, ROOT_OUTSIDE_REASON)
     def test_node_declared_params_reach_the_capability(self):
         spec = linear_spec()
         spec["nodes"][0]["compensate"] = "git-status"
