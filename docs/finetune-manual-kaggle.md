@@ -33,7 +33,7 @@ Base: **Qwen2.5-Coder-7B-Instruct**. Dataset: **155 verified pairs** (coding + A
 ## 4. Export + bring it home
 - `model.save_pretrained_gguf("qwen-alfred", tokenizer, quantization_method="q4_k_m")`
 - Download the `.gguf` from the **Output** panel (`/kaggle/working/`).
-- Drop it in `C:\Users\tpanc\.lmstudio\models\alfred\qwen-alfred-GGUF\`.
+- Drop it in `%USERPROFILE%\.lmstudio\models\alfred\qwen-alfred-GGUF\`.
 - Tell Alfred — I'll `lms load` it and repoint `local-coder` to your bespoke model.
 
 ## 5. If the install errors with "no kernel image"

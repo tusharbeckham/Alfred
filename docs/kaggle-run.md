@@ -12,7 +12,7 @@ either (A) drop a Kaggle API token and Alfred drives it, or (B) do a 5-step brow
 
 ## Path A — Alfred drives it (Kaggle API)
 1. Get a token: kaggle.com → your avatar → **Settings** → **API** → **Create New Token** (downloads `kaggle.json`).
-2. Place it at `C:\Users\tpanc\.kaggle\kaggle.json` (Alfred can't write there — it's your credential).
+2. Place it at `%USERPROFILE%\.kaggle\kaggle.json` (Alfred can't write there — it's your credential).
 3. Also enable Kaggle **phone verification** (required for GPU + internet in kernels).
 4. Tell Alfred "kaggle token ready" — Alfred will upload `train.jsonl` as a dataset, push the notebook
    as a GPU kernel, run it, and fetch the resulting GGUF.
