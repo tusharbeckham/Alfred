@@ -1,0 +1,57 @@
+# Runs every test suite in the repository.
+#
+# Windows, because that is what Alfred manages and what several suites exercise
+# directly: msvcrt line editing in the console, PowerShell capabilities in the
+# harness, the registry-free PC diagnostics. A Linux runner would have to skip
+# them, and a green badge that skipped the interesting half is a lie.
+#
+# No install step, deliberately. The project is standard library only, so if this
+# job ever needs `pip install`, that is the regression — not a missing dependency.
+#
+# The signed policy is not verified here and cannot be: the signing key lives in
+# secrets/, which is never committed, so a fresh clone has no key and no signature.
+# test_harness.py covers that path properly, with its own generated key — including
+# the case where a tampered policy must make the whole harness fail closed.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported, and current. The middle versions are covered by
+        # implication and would only buy runner minutes.
+        python-version: ['3.11', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Every suite
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($suite in Get-ChildItem scripts/test_*.py | Sort-Object Name) {
+            Write-Host "::group::$($suite.Name)"
+            & python $suite.FullName
+            if ($LASTEXITCODE -ne 0) { $failed += $suite.Name }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::failing suites: $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "all suites passed"

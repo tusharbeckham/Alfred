@@ -79,3 +79,8 @@ policy/harness-policy.sig
 memory/harness-audit.jsonl
 backups/
 tmp/
+
+# Per-agent episodic memory. The brain DESIGN is public on purpose — identity,
+# brain.md, skills, reflexes are the interesting part of this repository. What an
+# agent happens to have remembered about the Owner is not.
+.kiro/brains/*/memory/
