@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": "1.6",
   "description": "Alfred harness capability policy. Deny-by-default. Only capabilities listed here can run, and only the listed callers may invoke them. This file is integrity-protected: policy/harness-policy.sig must match, or the harness refuses to run.",
   "settings": {
     "denyByDefault": true,
@@ -10,7 +10,64 @@
     "allowedWorkspaceRoots": [
       "C:/Alfred",
       "C:/projects"
-    ]
+    ],
+    "maxOutputBytes": 4194304,
+    "auditChain": true,
+    "auditLoggableParams": [
+      "path",
+      "spec",
+      "pipeline",
+      "subject",
+      "predicate",
+      "object",
+      "kind",
+      "statement",
+      "days",
+      "query",
+      "message"
+    ],
+    "confinement": {
+      "maxMemoryBytes": 2147483648,
+      "maxJobMemoryBytes": 3221225472,
+      "maxActiveProcesses": 64,
+      "maxCpuSeconds": 1800,
+      "maxFileBytes": 536870912
+    },
+    "confinementByTrust": {
+      "untrusted": {
+        "maxMemoryBytes": 268435456,
+        "maxJobMemoryBytes": 402653184,
+        "maxActiveProcesses": 8,
+        "maxCpuSeconds": 60,
+        "maxFileBytes": 16777216
+      },
+      "low": {
+        "maxMemoryBytes": 1073741824,
+        "maxJobMemoryBytes": 1610612736,
+        "maxActiveProcesses": 32,
+        "maxCpuSeconds": 900,
+        "maxFileBytes": 268435456
+      },
+      "medium": {
+        "maxMemoryBytes": 2147483648,
+        "maxJobMemoryBytes": 3221225472,
+        "maxActiveProcesses": 64,
+        "maxCpuSeconds": 1800,
+        "maxFileBytes": 536870912
+      },
+      "high": {
+        "maxMemoryBytes": 6442450944,
+        "maxJobMemoryBytes": 8589934592,
+        "maxActiveProcesses": 128,
+        "maxCpuSeconds": 3600,
+        "maxFileBytes": 2147483648
+      }
+    },
+    "networkIsolation": {
+      "enforcedOn": "posix",
+      "mechanism": "unshare --user --map-current-user --net",
+      "note": "On Windows this is a declaration recorded in the audit trail, not an enforced boundary. AppContainer would enforce it; it is not implemented."
+    }
   },
   "callers": {
     "owner": {
@@ -44,9 +101,14 @@
         "graph-history",
         "graph-assert",
         "graph-doctor",
-        "ultron-pipeline",
-        "ultron-gauntlet-check"
-      ]
+        "ultron-gauntlet-check",
+        "audit-verify",
+        "audit-checkpoint"
+      ],
+      "rateLimit": {
+        "perMinute": 120,
+        "burst": 200
+      }
     },
     "local-model": {
       "description": "An untrusted LOCAL model (LM Studio / Ollama / any local weights). Read-only diagnostics ONLY. Cannot mutate the machine, cannot reach the network, cannot run tests that execute repo code.",
@@ -60,8 +122,14 @@
         "process-report",
         "graph-recall",
         "graph-current",
-        "graph-history"
-      ]
+        "graph-history",
+        "audit-verify"
+      ],
+      "rateLimit": {
+        "perMinute": 20,
+        "burst": 30
+      },
+      "requireScopedToken": true
     },
     "scheduled": {
       "description": "Unattended/overnight runs. Project-scoped work only; every gated capability is refused and queued for approval.",
@@ -81,8 +149,14 @@
         "disk-report",
         "graph-recall",
         "graph-doctor",
-        "ultron-gauntlet-check"
-      ]
+        "ultron-gauntlet-check",
+        "audit-verify",
+        "audit-checkpoint"
+      ],
+      "rateLimit": {
+        "perMinute": 60,
+        "burst": 90
+      }
     }
   },
   "capabilities": {
@@ -97,7 +171,8 @@
         "-File",
         "scripts/alfred-status.ps1"
       ],
-      "gated": false
+      "gated": false,
+      "network": false
     },
     "doctor": {
       "risk": "read",
@@ -110,7 +185,8 @@
         "-File",
         "scripts/alfred-doctor.ps1"
       ],
-      "gated": false
+      "gated": false,
+      "network": true
     },
     "recall": {
       "risk": "read",
@@ -130,7 +206,8 @@
           "type": "string",
           "maxLength": 300
         }
-      }
+      },
+      "network": false
     },
     "remember": {
       "risk": "write-memory",
@@ -169,7 +246,8 @@
           "type": "string",
           "maxLength": 2000
         }
-      }
+      },
+      "network": true
     },
     "web-search": {
       "risk": "network-read",
@@ -192,7 +270,8 @@
           "type": "string",
           "maxLength": 300
         }
-      }
+      },
+      "network": true
     },
     "index": {
       "risk": "read",
@@ -209,7 +288,8 @@
           "type": "path",
           "mustBeInsideWorkspace": true
         }
-      }
+      },
+      "network": true
     },
     "git-status": {
       "risk": "read",
@@ -228,7 +308,8 @@
           "type": "path",
           "mustBeInsideWorkspace": true
         }
-      }
+      },
+      "network": false
     },
     "disk-report": {
       "risk": "read",
@@ -239,7 +320,8 @@
         "-Command",
         "Get-PSDrive -PSProvider FileSystem | Select-Object Name,@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}},@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}} | ConvertTo-Json"
       ],
-      "gated": false
+      "gated": false,
+      "network": false
     },
     "process-report": {
       "risk": "read",
@@ -250,7 +332,8 @@
         "-Command",
         "Get-Process | Sort-Object WS -Descending | Select-Object -First 15 Name,Id,@{n='MemMB';e={[math]::Round($_.WS/1MB,1)}} | ConvertTo-Json"
       ],
-      "gated": false
+      "gated": false,
+      "network": false
     },
     "test": {
       "risk": "execute-project-code",
@@ -259,7 +342,8 @@
       "args": [
         "scripts/test_workflow.py"
       ],
-      "gated": false
+      "gated": false,
+      "network": true
     },
     "lint": {
       "risk": "read",
@@ -272,7 +356,8 @@
         "-File",
         "scripts/safety-lint.ps1"
       ],
-      "gated": false
+      "gated": false,
+      "network": true
     },
     "ci": {
       "risk": "execute-project-code",
@@ -285,7 +370,8 @@
         "-File",
         "scripts/ci-run.ps1"
       ],
-      "gated": false
+      "gated": false,
+      "network": true
     },
     "workflow-plan": {
       "risk": "read",
@@ -309,7 +395,8 @@
             "release"
           ]
         }
-      }
+      },
+      "network": false
     },
     "workflow-run": {
       "risk": "spawn-agents",
@@ -344,7 +431,8 @@
           "type": "string",
           "maxLength": 500
         }
-      }
+      },
+      "network": true
     },
     "backup": {
       "risk": "write-disk",
@@ -357,7 +445,8 @@
         "-File",
         "scripts/harness-backup.ps1"
       ],
-      "gated": true
+      "gated": true,
+      "network": false
     },
     "git-commit": {
       "risk": "write-vcs",
@@ -378,7 +467,8 @@
           "type": "string",
           "maxLength": 300
         }
-      }
+      },
+      "network": false
     },
     "graph-recall": {
       "risk": "read",
@@ -400,7 +490,8 @@
           "type": "string",
           "maxLength": 300
         }
-      }
+      },
+      "network": true
     },
     "graph-current": {
       "risk": "read",
@@ -418,7 +509,8 @@
           "type": "string",
           "maxLength": 120
         }
-      }
+      },
+      "network": false
     },
     "graph-history": {
       "risk": "read",
@@ -442,7 +534,8 @@
           "type": "string",
           "maxLength": 120
         }
-      }
+      },
+      "network": false
     },
     "graph-assert": {
       "risk": "write-memory",
@@ -490,7 +583,8 @@
           "type": "string",
           "maxLength": 2000
         }
-      }
+      },
+      "network": false
     },
     "graph-doctor": {
       "risk": "read",
@@ -501,7 +595,8 @@
         "doctor"
       ],
       "gated": false,
-      "params": {}
+      "params": {},
+      "network": false
     },
     "ultron-pipeline": {
       "risk": "spawn-agents",
@@ -525,7 +620,8 @@
           "type": "string",
           "maxLength": 2000
         }
-      }
+      },
+      "network": true
     },
     "ultron-gauntlet-check": {
       "risk": "read",
@@ -542,7 +638,32 @@
           "type": "path",
           "maxLength": 400
         }
-      }
+      },
+      "network": false
+    },
+    "audit-verify": {
+      "risk": "read",
+      "description": "Verify the audit trail's hash chain is unbroken",
+      "command": "python",
+      "args": [
+        "scripts/harness.py",
+        "audit-verify"
+      ],
+      "gated": false,
+      "params": {},
+      "network": false
+    },
+    "audit-checkpoint": {
+      "risk": "read",
+      "description": "Witness the audit chain head to an external file (detects tail truncation)",
+      "command": "python",
+      "args": [
+        "scripts/harness.py",
+        "checkpoint"
+      ],
+      "gated": false,
+      "params": {},
+      "network": false
     }
   },
   "forbidden": {

@@ -28,6 +28,26 @@ def run(args: list[str], env_extra: dict[str, str] | None = None) -> subprocess.
     )
 
 
+def mint_token(caller: str, scopes: list[str] | None = None, ttl: int = 120) -> str:
+    """Mint a real scoped token through the CLI.
+
+    Deliberately not constructed by hand: a test that builds its own token is testing
+    the test's idea of the format, not the harness's. Going through `mint-token` means
+    a change to the token format breaks these tests loudly instead of leaving them
+    passing against a format nothing uses any more.
+
+    ``ttl`` may be negative, which is how the expiry test gets an already-dead token
+    without sleeping.
+    """
+    args = ["mint-token", caller, "--ttl", str(ttl)]
+    for scope in scopes or []:
+        args += ["--scope", scope]
+    result = run(args)
+    if result.returncode != 0:
+        raise AssertionError(f"mint-token failed: {result.stderr}")
+    return json.loads(result.stdout)["token"]
+
+
 class PolicyIntegrity(unittest.TestCase):
     def test_policy_verifies(self):
         result = run(["verify"])
@@ -126,29 +146,51 @@ class UntrustedLocalModelContainment(unittest.TestCase):
 
     def test_local_model_cannot_run_capabilities_outside_its_allowlist(self):
         """Even with a valid token, the allowlist still binds."""
-        # Derived at runtime so no credential-shaped literal ever lands in the repo.
-        token = hashlib.sha256(b"harness-test-fixture-v1").hexdigest()[:32]
+        # local-model is `requireScopedToken`, so the credential is minted by the
+        # harness rather than shared. Nothing credential-shaped is stored in the repo:
+        # the token exists only for the life of this test and expires by itself.
+        token = mint_token("local-model", ttl=120)
+        # In its allowlist -> permitted.
+        ok = run(["run", "disk-report", "--caller", "local-model", "--token", token])
+        self.assertEqual(ok.returncode, EXIT_OK, ok.stderr)
+        # NOT in its allowlist -> refused, despite a valid token.
+        for capability, params in [
+            ("ci", []),
+            ("test", []),
+            ("web-search", ["--param", "query=x"]),
+            ("remember", ["--param", "type=fact", "--param", "topic=t", "--param", "text=x"]),
+            ("workflow-run", ["--param", "workflow=feature", "--param", "task=x"]),
+            ("backup", []),
+        ]:
+            with self.subTest(capability=capability):
+                denied = run(["run", capability, "--caller", "local-model", "--token", token, "--approve", *params])
+                self.assertEqual(denied.returncode, EXIT_DENIED, f"{capability} must be denied")
+
+    def test_local_model_flat_shared_token_is_refused(self):
+        """The untrusted caller must present a scoped token, not a shared secret.
+
+        A flat token never expires and is bound to nothing, so one leak is permanent
+        and usable against any capability the caller holds. For the caller we trust
+        least, that is the wrong shape of credential - the policy now says so, and
+        provisioning a flat one does not quietly re-enable it.
+        """
+        # Derived at runtime rather than written as a literal. The repo's own pre-commit
+        # secret scanner flags credential-shaped string assignments, and it is right to:
+        # the correct answer is not to silence it with --no-verify but to stop putting
+        # things that look like credentials in source files.
+        token = hashlib.sha256(b"harness-flat-token-fixture").hexdigest()[:24]
         store = ROOT / "secrets" / "harness-callers.json"
         existed = store.exists()
         backup = store.read_bytes() if existed else None
         try:
             store.parent.mkdir(parents=True, exist_ok=True)
-            store.write_text(json.dumps({"local-model": hashlib.sha256(token.encode()).hexdigest()}), encoding="utf-8")
-            # In its allowlist -> permitted.
-            ok = run(["run", "disk-report", "--caller", "local-model", "--token", token])
-            self.assertEqual(ok.returncode, EXIT_OK, ok.stderr)
-            # NOT in its allowlist -> refused, despite a valid token.
-            for capability, params in [
-                ("ci", []),
-                ("test", []),
-                ("web-search", ["--param", "query=x"]),
-                ("remember", ["--param", "type=fact", "--param", "topic=t", "--param", "text=x"]),
-                ("workflow-run", ["--param", "workflow=feature", "--param", "task=x"]),
-                ("backup", []),
-            ]:
-                with self.subTest(capability=capability):
-                    denied = run(["run", capability, "--caller", "local-model", "--token", token, "--approve", *params])
-                    self.assertEqual(denied.returncode, EXIT_DENIED, f"{capability} must be denied")
+            store.write_text(
+                json.dumps({"local-model": hashlib.sha256(token.encode()).hexdigest()}),
+                encoding="utf-8",
+            )
+            result = run(["run", "disk-report", "--caller", "local-model", "--token", token])
+            self.assertEqual(result.returncode, EXIT_DENIED, result.stderr)
+            self.assertIn("scoped token", result.stderr)
         finally:
             if existed:
                 store.write_bytes(backup)
@@ -156,20 +198,168 @@ class UntrustedLocalModelContainment(unittest.TestCase):
                 store.unlink(missing_ok=True)
 
     def test_a_wrong_token_is_rejected(self):
-        store = ROOT / "secrets" / "harness-callers.json"
-        existed = store.exists()
-        backup = store.read_bytes() if existed else None
+        """A forged, garbled, or tampered token is refused - and so is a valid one
+        whose MAC has been touched by a single character."""
+        good = mint_token("local-model", ttl=120)
+        # Flip one character of the MAC. Everything else about the token is authentic.
+        tampered = good[:-1] + ("0" if good[-1] != "0" else "1")
+        for label, token in [
+            ("garbage", "wrong"),
+            ("right shape, wrong mac", "aht1.local-model.99999999999.abc.status.deadbeef" + "0" * 24),
+            ("one flipped mac character", tampered),
+        ]:
+            with self.subTest(token=label):
+                result = run(["run", "disk-report", "--caller", "local-model", "--token", token])
+                self.assertEqual(result.returncode, EXIT_DENIED, result.stderr)
+
+
+class ScopedTokens(unittest.TestCase):
+    """Tokens carry their caller, expiry and capability list inside the HMAC.
+
+    The threat is the confused deputy: the untrusted local model legitimately holds a
+    token, and a prompt injection only needs to talk it into spending that token on a
+    capability the attacker picked. Binding the capability into the signature means a
+    token minted for reading cannot be aimed at writing.
+    """
+
+    def test_a_token_scoped_to_one_capability_does_not_work_on_another(self):
+        token = mint_token("local-model", scopes=["graph-recall"], ttl=120)
+        ok = run(["run", "graph-recall", "--caller", "local-model", "--token", token,
+                  "--param", "query=test"])
+        self.assertEqual(ok.returncode, EXIT_OK, ok.stderr)
+
+        # Same caller, same allowlist, same valid unexpired token - different capability.
+        denied = run(["run", "disk-report", "--caller", "local-model", "--token", token])
+        self.assertEqual(denied.returncode, EXIT_DENIED, denied.stdout)
+        self.assertIn("scoped", denied.stderr)
+
+    def test_an_expired_token_is_refused(self):
+        expired = mint_token("local-model", scopes=["disk-report"], ttl=-5)
+        result = run(["run", "disk-report", "--caller", "local-model", "--token", expired])
+        self.assertEqual(result.returncode, EXIT_DENIED, result.stdout)
+        self.assertIn("expired", result.stderr)
+
+    def test_a_token_cannot_be_replayed_as_another_caller(self):
+        token = mint_token("local-model", scopes=["disk-report"], ttl=120)
+        result = run(["run", "disk-report", "--caller", "scheduled", "--token", token])
+        self.assertEqual(result.returncode, EXIT_DENIED, result.stdout)
+        self.assertIn("issued for caller", result.stderr)
+
+    def test_minting_cannot_grant_more_than_the_policy_allows(self):
+        """A token is a narrowing device, never a widening one."""
+        result = run(["mint-token", "local-model", "--scope", "backup"])
+        self.assertEqual(result.returncode, EXIT_INPUT, result.stdout)
+        self.assertIn("not permitted", result.stderr)
+
+    def test_the_minted_token_is_not_written_to_the_audit_trail(self):
+        """The trail records which token was used, by nonce, never the token itself."""
+        token = mint_token("local-model", scopes=["disk-report"], ttl=120)
+        run(["run", "disk-report", "--caller", "local-model", "--token", token])
+        trail = (ROOT / "memory" / "harness-audit.jsonl").read_text(encoding="utf-8", errors="replace")
+        self.assertNotIn(token, trail, "a bearer token must never land in an append-only log")
+        self.assertIn("tokenNonce", trail.splitlines()[-1])
+
+
+class ReviewedSigning(unittest.TestCase):
+    """Signing is the one step where a human blesses a change, and it was a rubber stamp.
+
+    `harness sign` hashed whatever bytes were on disk and reported nothing about what they
+    contained. A model that edits the policy cannot forge a signature — but it does not need
+    to. It only needs the Owner to re-sign for some unrelated reason, at which point the edit
+    is blessed for free. `sign --review` is what makes that not work.
+    """
+
+    def setUp(self):
+        self.policy_path = ROOT / "policy" / "harness-policy.json"
+        self.original = self.policy_path.read_bytes()
+
+    def tearDown(self):
+        self.policy_path.write_bytes(self.original)
+        run(["sign"])
+        self.assertEqual(run(["verify"]).returncode, EXIT_OK, "policy restored and re-signed")
+
+    def _escalate(self):
+        """The hostile edit: grant a write capability, drop the token, promote the caller."""
+        policy = json.loads(self.original)
+        policy["callers"]["local-model"]["capabilities"].append("remember")
+        policy["callers"]["local-model"]["authRequired"] = False
+        policy["callers"]["local-model"]["trust"] = "medium"
+        self.policy_path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+
+    def test_an_unchanged_policy_reports_identical(self):
+        result = run(["diff"])
+        self.assertEqual(result.returncode, EXIT_OK, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["identical"])
+
+    def test_diff_names_each_privilege_increase_and_why(self):
+        self._escalate()
+        delta = json.loads(run(["diff"]).stdout)
+        reasons = {e["why"] for e in delta["privilegeIncreases"]}
+        self.assertIn("a caller gained a capability", reasons)
+        self.assertIn("a restriction was switched off", reasons)
+        self.assertIn("a caller was promoted", reasons)
+
+    def test_sign_review_refuses_a_privilege_increase(self):
+        self._escalate()
+        result = run(["sign", "--review"])
+        self.assertEqual(result.returncode, EXIT_DENIED, result.stdout)
+        self.assertIn("REFUSING TO SIGN", result.stderr)
+
+    def test_sign_review_proceeds_when_the_escalation_is_accepted(self):
+        """The gate must be passable, or it becomes something people route around."""
+        self._escalate()
+        result = run(["sign", "--review", "--accept-escalation"])
+        self.assertEqual(result.returncode, EXIT_OK, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["signed"])
+
+    def test_sign_review_refuses_a_policy_with_lint_errors(self):
+        """Two independent objections. Lint catches a policy that cannot mean what it says;
+        the diff catches one that means something new. Neither subsumes the other."""
+        policy = json.loads(self.original)
+        policy["callers"]["kiro-agent"]["capabilities"].append("no-such-capability")
+        self.policy_path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+        result = run(["sign", "--review"])
+        self.assertEqual(result.returncode, EXIT_POLICY, result.stdout)
+        self.assertIn("lint errors", result.stderr)
+
+    def test_a_tightening_change_is_not_reported_as_an_escalation(self):
+        """A review tool that cries wolf gets skimmed. Removing a grant is not a privilege
+        increase and must not be flagged as one."""
+        policy = json.loads(self.original)
+        policy["callers"]["kiro-agent"]["capabilities"] = [
+            c for c in policy["callers"]["kiro-agent"]["capabilities"] if c != "test"
+        ]
+        self.policy_path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+        delta = json.loads(run(["diff"]).stdout)
+        self.assertEqual(delta["privilegeIncreases"], [], delta)
+        self.assertTrue(any(".grants.test" in r["key"] for r in delta["removed"]))
+
+    def test_reformatting_the_policy_is_not_a_change(self):
+        """The diff is semantic. A textual diff would flag reindentation and key reordering
+        while a caller quietly gaining a capability sat in the noise."""
+        policy = json.loads(self.original)
+        # Different indentation, reordered keys, reordered allowlist - same meaning.
+        policy["callers"]["kiro-agent"]["capabilities"].reverse()
+        reordered = {k: policy[k] for k in reversed(list(policy))}
+        self.policy_path.write_text(json.dumps(reordered, indent=8), encoding="utf-8")
+        delta = json.loads(run(["diff"]).stdout)
+        self.assertTrue(delta["identical"],
+                        f"reformatting must not register as a change: {delta}")
+
+    def test_the_snapshot_is_refused_if_it_does_not_match_the_signature(self):
+        """The snapshot is self-verifying, so editing it cannot fool the diff into
+        reporting 'nothing changed'."""
+        snapshot = ROOT / "policy" / "harness-policy.signed.json"
+        saved = snapshot.read_bytes()
         try:
-            store.parent.mkdir(parents=True, exist_ok=True)
-            store.write_text(json.dumps({"local-model": hashlib.sha256(b"right").hexdigest()}), encoding="utf-8")
-            result = run(["run", "disk-report", "--caller", "local-model", "--token", "wrong"])
-            self.assertEqual(result.returncode, EXIT_DENIED)
-            self.assertIn("Invalid token", result.stderr)
+            tampered = json.loads(saved)
+            tampered["callers"]["local-model"]["capabilities"].append("backup")
+            snapshot.write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+            payload = json.loads(run(["diff"]).stdout)
+            self.assertEqual(payload.get("diff"), "unavailable",
+                             "an unverifiable snapshot must be refused, not believed")
         finally:
-            if existed:
-                store.write_bytes(backup)
-            else:
-                store.unlink(missing_ok=True)
+            snapshot.write_bytes(saved)
 
 
 class DenyByDefault(unittest.TestCase):
