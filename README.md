@@ -17,7 +17,7 @@ Alfred is a personal AI operating layer: a coordinated team of specialized agent
 
 Four surfaces drive it — the Kiro CLI, the [Ultron CLI](https://github.com/tusharbeckham/Ultron), local models via LM Studio, and Notion AI over MCP — and all four reach the same engine through the same **cryptographically signed** capability policy, landing in the same audit trail.
 
-**Everything here is standard library only.** No pip install, no npm install, no CDN, no cloud account. It works offline on a fresh clone, and `python scripts/test_*.py` → **515 tests passing**.
+**Everything here is standard library only.** No pip install, no npm install, no CDN, no cloud account. It works offline on a fresh clone, and `python scripts/test_*.py` → **659 tests passing**.
 
 ---
 
@@ -70,19 +70,50 @@ harness run git-status --param path=C:\Alfred
 harness run backup --approve                # gated: needs explicit approval
 ```
 
-Five independent controls, because the threat being defended against is *a local model that
+Sixteen independent controls, because the threat being defended against is *a local model that
 can edit files in this repo*:
 
 | Control | Effect |
 |---|---|
 | **Signed policy** | `policy/harness-policy.json` is HMAC-SHA256 signed; the key lives in `secrets/` where every agent is denied access. Edit the policy without the key and the harness refuses to run **anything**. |
 | **Deny by default** | Capabilities not in the policy cannot run, whoever asks. |
-| **Per-caller allowlists** | `owner` (high) · `kiro-agent` (medium) · `local-model` (**untrusted**, 5 read-only diagnostics, token required) · `scheduled` (low). |
+| **Per-caller allowlists** | `owner` (high) · `kiro-agent` (medium) · `local-model` (**untrusted**, 8 read-only diagnostics, scoped token required) · `scheduled` (low). |
 | **Argv-only execution** | No shell string is ever built. Params are type-validated, paths confined, enums exact-matched. Injection payloads are inert data. |
 | **Audit trail** | Every attempt — executed, denied, or dry-run — appends to `memory/harness-audit.jsonl`. |
+| **Windows path resolution** | A path *string* and the file it opens differ on Windows. UNC prefixes, NTFS alternate data streams, DOS device names (`CON`/`NUL`), trailing dots, 8.3 short names and junctions out of the workspace are all refused — **before** any pattern check, because matching an unnormalized path matches the attacker's spelling rather than the target. |
+| **Bounded output** | `capture_output=True` buffers a child's whole output in memory, so "write 4 GB to stdout" was a DoS available to *any* caller. Capped at 4 MiB, and truncation is reported rather than passed off as the full result. |
+| **Hash-chained audit** | Each record hashes the previous one, so `harness audit-verify` names the exact line where history was rewritten. Tail truncation is *not* covered — `harness checkpoint` writes an external witness, and the gap is documented rather than glossed over. |
+| **Scoped tokens + quotas** | Tokens carry caller, expiry and capability list *inside* the HMAC, so a credential minted for reading cannot be aimed at writing by a prompt injection. Per-caller token buckets bound a runaway loop. |
+| **Resource confinement** | The child runs inside a **Windows Job Object**: memory ceiling (per-process *and* per-job), process cap, CPU limit, scaled by trust — `untrusted` gets 256 MiB and 8 processes. There is no assign-after-spawn race: the child is created **suspended**, attached to the job, and only then resumed, so it cannot fork an unconfined grandchild in the gap. Kill-on-close means the tree cannot outlive the harness. |
+| **Revocable tokens** | Expiry is not revocation — a token leaked in minute one of a one-hour TTL is usable for fifty-nine. `harness revoke --token` kills one; `harness revoke --caller` kills every token already issued for a caller, which is the case you can actually act on when you know *what* leaked but not *which*. |
+| **Cross-platform confinement** | On Linux the same policy applies via `setrlimit`, with the differences stated rather than smoothed over — POSIX has no whole-tree memory cap, and `RLIMIT_NPROC` counts per user; but it *does* have `RLIMIT_FSIZE`, a real disk bound Windows lacks. Verified where it runs: `wsl -e python3 scripts/verify_posix_confine.py` → **13 checks pass**, including a control proving the same allocation succeeds unconfined. |
+| **Reviewed signing** | The weakest human step, now closed. `harness sign` used to HMAC whatever bytes were on disk and say nothing about them — a model's edit only had to wait for the Owner to re-sign for an unrelated reason to be blessed for free. `harness diff` shows a **semantic** diff against a self-verifying snapshot of the last signed policy, and `sign --review` **refuses** a change that grants new privilege unless `--accept-escalation` is passed. |
+| **Sealed pre-chain history** | The chain honestly reported 1237 older records it did not cover — which meant they could be edited while `audit-verify` still said ok. They cannot be retroactively chained without rewriting them, so `harness seal-legacy` takes one **HMAC** (not a bare hash, which an editor could recompute) over the region. The claim is narrow and stated as such: unchanged *since the seal*. |
+| **Declared egress** | Every capability states whether it needs the network; 15 of 25 do not. On Linux those run in a fresh network namespace (`unshare --user --map-current-user --net`) and cannot reach anything, loopback included. The classification is evidence-based — checking `memgraph.py`'s *call sites* rather than its imports moved four capabilities into isolation and cut the untrusted caller's reach from three capabilities to one. On Windows it is declaration + audit; AppContainer would enforce it and is not implemented. |
+| **Inspectable approvals** | Reviewed signing can say what changed since the last signature, not whether *that* signature was reviewed — and the first one on any clone never was. `harness review-log` is a hash-chained record of every signing: when, whether `--review` ran, and which escalations were accepted by name. The gap does not close, but it stops being invisible. |
 
-Verified by `python scripts/test_harness.py` → **25 tests**, including one that grants
-`local-model` full capabilities and asserts the whole harness then fails closed.
+And a seventeenth thing that is not a runtime control but caught a real bug: `harness lint`
+checks that the policy *means* what its author intended, not merely that nobody tampered
+with it. Its first run found that `kiro-agent` held `ultron-pipeline` — a gated,
+high-trust-only capability — so the allowlist had been advertising a power the gate refused
+every single time. Confirmed by running it, then removed.
+
+Verified by `python scripts/test_harness.py` → **41 tests** (including one that grants
+`local-model` full capabilities and asserts the whole harness then fails closed) plus
+`python scripts/test_harness_guards.py` → **107 tests** covering every path trick, the
+chain, the quotas, revocation and the linter. The confinement tests spend real memory: a
+child asking for 400 MB under a 64 MB cap gets `MemoryError`, and a control test proves the
+same allocation succeeds *without* a limit — so the ceiling is demonstrably enforced by the
+kernel, not by a config file.
+
+And then the claims are attacked rather than merely tested: `python scripts/redteam_harness.py`
+attempts every one of them — tampering with the policy, aiming a scoped token at the wrong
+capability, replaying it as another caller, smuggling six shell payloads through parameters,
+pointing a path capability at UNC paths and device names and the signing key, draining a quota
+bucket, editing and truncating audit records, laundering a pre-chain edit by resealing with a
+foreign key, and trying to get a hostile policy blessed by a legitimate re-sign. **66 probes
+across 19 control families, all holding.** A probe only passes if the refusal came for the
+*right reason*, which is how it caught a stale probe of its own.
 Full documentation and threat model: [`docs/harness.md`](docs/harness.md).
 
 ## The console — one interactive surface
@@ -94,7 +125,7 @@ Full documentation and threat model: [`docs/harness.md`](docs/harness.md).
  / ___ \| |___|  _| |  _ <| |___| |_| |
 /_/   \_\_____|_|   |_| \_\_____|____/
 
-  ✓ harness       23 capabilities, 4 gated
+  ✓ harness       25 capabilities, 4 gated
   ✓ lm studio     alfred-coder-7b, text-embedding-nomic-embed-text-v1.5
   ✓ memory graph  58 facts, 59 embedded
   ✓ ultron        node + gauntlet parity
@@ -210,7 +241,7 @@ Alfred and Ultron stay separate on purpose (Python vs Node, different trust mode
 Why mirror the router instead of just the schema: the anti-thrash rule is *structural*. If Ultron ran the same graph with a plain retry loop, then **where** you ran a spec would silently change what it was allowed to do, and the guarantee would belong to the runtime rather than the spec. So both engines carry the same bounds, and a parity test fails the build if they drift:
 
 ```powershell
-python scripts/test_ultron_parity.py     # 13 tests: same verdict, same route, same bounds
+python scripts/test_ultron_parity.py     # 30 tests: same verdict, same route, same bounds, same guards
 harness run ultron-gauntlet-check --param spec=workflows/feature-gated.json
 harness run ultron-pipeline --param pipeline=feature --param task="..." --approve
 ```
@@ -297,7 +328,7 @@ git clone https://github.com/tusharbeckham/Alfred.git
 cd Alfred
 python scripts/harness.py sign     # generate THIS clone's signing key
 alfred status                      # probe every subsystem
-Get-ChildItem scripts/test_*.py | ForEach-Object { python $_.FullName }   # 515 tests
+Get-ChildItem scripts/test_*.py | ForEach-Object { python $_.FullName }   # 659 tests
 ```
 
 Sign first, and the reason is the whole design in one command: the key that signs
@@ -346,7 +377,7 @@ alfred "add input validation to this function"
 | `scripts/` | Automation: **harness**, **workflow engine**, security tools, local coder, memory, web, voice (TTS), fine-tune builder, CI, training |
 | `workflows/` | Declarative multi-agent DAG workflow specs (run by `scripts/workflow.py`) |
 | `evals/` | Eval datasets + rubrics |
-| `docs/` | Setup and workflow guides (incl. [`harness.md`](docs/harness.md), [`graph-engineering-plan.md`](docs/graph-engineering-plan.md)) |
+| `docs/` | Setup and workflow guides (incl. [`harness.md`](docs/harness.md), [`graph-engineering-plan.md`](docs/graph-engineering-plan.md), [`terminal-research.md`](docs/terminal-research.md)) |
 | `notebooks/` | Fine-tune notebook |
 
 > Personal data — the memory trail, fine-tune datasets, eval outputs, and secrets — is kept **local-only** and git-ignored by design.
@@ -364,7 +395,7 @@ Worth saying plainly, because the feature list above is long:
   and one set of preferences. Paths are absolute in places. It will not survive
   first contact with your setup unread.
 - **Not audited.** The harness threat model in [`docs/harness.md`](docs/harness.md)
-  is my own reasoning, tested by 25 tests I also wrote. Read it before trusting it
+  is my own reasoning, tested by 181 tests I also wrote. Read it before trusting it
   with anything that matters.
 - **Not multi-user.** Every trust decision assumes a single Owner at the keyboard.
 

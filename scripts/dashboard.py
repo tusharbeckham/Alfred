@@ -41,6 +41,7 @@ import secrets
 import sqlite3
 import subprocess
 import sys
+import time
 import threading
 import webbrowser
 from datetime import datetime, timezone
@@ -133,9 +134,115 @@ def collect_health() -> dict:
         "capabilityCount": payload.get("capabilityCount"),
         "gated": payload.get("gated", []),
         "callers": payload.get("callers", {}),
+        # v1.1-1.3 controls. Surfaced here because the dashboard's job is to answer "what
+        # is this system refusing to do?", and a control nobody can see is a control
+        # nobody maintains - the audit chain in particular is worthless if a break sits
+        # unnoticed until someone thinks to run audit-verify by hand.
+        "auditChain": payload.get("auditChain"),
+        "maxOutputBytes": payload.get("maxOutputBytes"),
+        "rateLimited": payload.get("rateLimited", []),
+        "lintErrors": payload.get("lintErrors"),
+        **collect_integrity(),
         # A failure here means the harness is refusing to run ANYTHING.
         "error": (err or out).strip()[:600] if code != 0 else "",
     }
+
+
+def collect_integrity() -> dict:
+    """Audit-chain state, resource confinement, quota budgets and revocations.
+
+    Read straight from the files rather than by shelling out again: the dashboard is
+    read-only and must stay cheap enough to poll, and every one of these is a small local
+    file the dashboard process can already see.
+
+    Nothing here can contain a credential. Revocations are reported as a *count* and the
+    caller epochs, never the nonces - a nonce identifies a specific token, and while
+    knowing it grants nothing, there is no reason for a browser to receive it.
+    """
+    out: dict = {}
+
+    # Audit chain. This is the signal that matters most after the policy signature.
+    try:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import harness_guards as guards
+
+        chain = guards.chain_verify(AUDIT_PATH)
+        out["auditChainOk"] = bool(chain.get("ok"))
+        out["auditRecords"] = chain.get("records", 0)
+        out["auditChained"] = chain.get("chained", 0)
+        out["auditLegacy"] = chain.get("legacy", 0)
+        if not chain.get("ok"):
+            out["auditBrokenAt"] = chain.get("brokenAt")
+            out["auditBreakReason"] = str(chain.get("reason", ""))[:200]
+
+        revocations = guards.load_revocations(ROOT / "secrets" / "harness-revoked.json")
+        out["revokedTokens"] = len(revocations.get("nonces", {}))
+        out["revokedCallers"] = sorted(revocations.get("callerEpochs", {}))
+
+        # The pre-chain region. Before it was sealed, these records could be edited freely
+        # and audit-verify would still say "ok", because the chain did not cover them - so
+        # "1237 records the chain does not protect" was a true statement nobody could see.
+        import harness as _harness
+
+        seal = guards.verify_legacy_seal(AUDIT_PATH, _harness.load_key(), _harness.SEAL_PATH)
+        out["legacySealed"] = bool(seal.get("sealed"))
+        out["legacyIntact"] = seal.get("intact")
+        out["legacyRecords"] = seal.get("legacyRecords", 0)
+
+        # Signing provenance. `sign --review` says what changed since the last signature; only
+        # the ledger says whether that signature was itself examined, and the first one on any
+        # clone never was. Showing the count makes an unreviewed baseline a visible fact.
+        review = guards.review_history(_harness.REVIEW_LEDGER_PATH, limit=1)
+        out["signings"] = review.get("signings", 0)
+        out["signingsReviewed"] = review.get("reviewed", 0)
+        out["signingsUnreviewed"] = review.get("unreviewed", 0)
+        out["baselineWasReviewed"] = review.get("baselineWasReviewed")
+    except Exception as exc:  # noqa: BLE001 - the dashboard must render even if a guard errors
+        out["integrityError"] = f"{type(exc).__name__}: {exc}"[:200]
+
+    # The most recent external witness. Without one, tail truncation is undetectable, so
+    # "no checkpoint yet" is itself worth showing rather than omitting.
+    witnesses = _tail_jsonl(ROOT / "memory" / "harness-audit-checkpoints.jsonl", 1)
+    out["lastCheckpoint"] = witnesses[0].get("ts") if witnesses else None
+
+    # Resource confinement and live quota budgets.
+    try:
+        policy = json.loads(_safe_read_text(POLICY_PATH) or "{}")
+        settings = policy.get("settings", {})
+        out["confinementConfigured"] = bool(settings.get("confinement"))
+        out["confinementByTrust"] = sorted((settings.get("confinementByTrust") or {}))
+        # Egress. How much of the capability surface is declared local-only, and which
+        # capabilities the least-trusted caller can still use to reach the network.
+        caps = policy.get("capabilities", {})
+        out["egressIsolated"] = sorted(n for n, s in caps.items() if not s.get("network", True))
+        out["egressAllowed"] = sorted(n for n, s in caps.items() if s.get("network", True))
+        untrusted_reach: list[str] = []
+        for name, spec in policy.get("callers", {}).items():
+            if spec.get("trust") != "untrusted":
+                continue
+            untrusted_reach += [c for c in spec.get("capabilities", [])
+                                if c in caps and caps[c].get("network", True)]
+        out["untrustedNetworkReach"] = sorted(set(untrusted_reach))
+        quota_state = json.loads(_safe_read_text(ROOT / "memory" / "harness-quota.json") or "{}")
+        budgets = {}
+        for name, spec in policy.get("callers", {}).items():
+            limits = spec.get("rateLimit") or {}
+            per_minute = int(limits.get("perMinute", 0))
+            if per_minute <= 0:
+                continue
+            capacity = float(limits.get("burst", per_minute))
+            bucket = quota_state.get(name) or {}
+            tokens = float(bucket.get("tokens", capacity))
+            if bucket:
+                elapsed = max(0.0, time.time() - float(bucket.get("ts", 0)))
+                tokens = min(capacity, tokens + elapsed * (per_minute / 60.0))
+            budgets[name] = {"perMinute": per_minute, "burst": int(capacity),
+                             "available": round(tokens, 1)}
+        out["quotas"] = budgets
+    except Exception as exc:  # noqa: BLE001
+        out["quotaError"] = f"{type(exc).__name__}: {exc}"[:200]
+
+    return out
 
 
 def collect_policy() -> dict:
@@ -695,12 +802,54 @@ function render(){
     const callers = Object.entries(policy.callers||{}).map(([n,c]) =>
       `<div class="kv"><span>${esc(n)} ${pill(c.trust)}</span>
         <span class="mono">${c.allowed.length} allowed / ${c.deniedCount} denied</span></div>`).join('');
+    // Every control the harness gained in v1.1-1.3, shown as state rather than as a claim.
+    // A chain break, a missing witness, or a lint error is the kind of thing that goes
+    // unnoticed for weeks if you have to remember to run a command to see it.
+    const quotas = Object.entries(health.quotas||{}).map(([n,q]) =>
+      `<div class="kv"><span>${esc(n)}</span>
+        <span class="mono">${q.available} / ${q.burst} left · ${q.perMinute}/min</span></div>`).join('');
+    const chainPill = health.auditChainOk
+      ? pill('unbroken','ok')
+      : pill(`BROKEN at line ${esc(health.auditBrokenAt)}`,'bad');
+    const controls = `
+      <div class="kv"><span>Audit chain</span>${chainPill}</div>
+      <div class="kv"><span>Chained records</span><span class="mono">${esc(health.auditChained)} of ${esc(health.auditRecords)}${
+        health.auditLegacy ? ` (${esc(health.auditLegacy)} pre-chain, not covered)` : ''}</span></div>
+      <div class="kv"><span>Pre-chain records</span>${
+        !health.legacyRecords ? '<span class="mono">none</span>'
+        : health.legacyIntact ? pill(`${esc(health.legacyRecords)} sealed &amp; intact`,'ok')
+        : health.legacySealed ? pill('SEAL BROKEN — history was altered','bad')
+        : pill(`${esc(health.legacyRecords)} unsealed`,'bad')}</div>
+      <div class="kv"><span>Last checkpoint</span>${
+        health.lastCheckpoint ? `<span class="mono">${esc(health.lastCheckpoint)}</span>`
+                              : pill('never — tail truncation undetectable','bad')}</div>
+      <div class="kv"><span>Resource confinement</span>${
+        health.confinementConfigured ? pill('job objects','ok') : pill('not configured','bad')}</div>
+      <div class="kv"><span>Output cap</span><span class="mono">${
+        health.maxOutputBytes ? Math.round(health.maxOutputBytes/1048576)+' MiB' : 'none'}</span></div>
+      <div class="kv"><span>Policy lint</span>${
+        health.lintErrors === 0 ? pill('clean','ok') : pill(`${esc(health.lintErrors)} errors`,'bad')}</div>
+      <div class="kv"><span>Revoked tokens</span><span class="mono">${esc(health.revokedTokens ?? 0)}${
+        (health.revokedCallers||[]).length ? ` · callers: ${esc((health.revokedCallers||[]).join(', '))}` : ''}</span></div>
+      <div class="kv"><span>Egress-isolated</span><span class="mono">${
+        esc((health.egressIsolated||[]).length)} of ${esc((health.egressIsolated||[]).length + (health.egressAllowed||[]).length)} capabilities</span></div>
+      <div class="kv"><span>Untrusted network reach</span>${
+        !(health.untrustedNetworkReach||[]).length ? pill('none','ok')
+        : `<span class="mono">${esc((health.untrustedNetworkReach||[]).join(', '))}</span>`}</div>
+      <div class="kv"><span>Signings reviewed</span>${
+        !health.signings ? '<span class="mono">no ledger yet</span>'
+        : `<span class="mono">${esc(health.signingsReviewed)} of ${esc(health.signings)}${
+            health.baselineWasReviewed === false ? ' · baseline unreviewed' : ''}</span>`}</div>`;
     v.innerHTML = `<div class="grid">
       ${card('Capabilities', health.capabilityCount ?? '-', `${(health.gated||[]).length} gated`)}
       ${card('Audit events', audit.total, `${audit.counts.denied} denied · ${audit.counts.executed} executed`)}
       ${card('Workflow runs', (runs.runs||[]).length, 'most recent first')}
       ${card('Memory', memory.episodicCount, `${memory.megamindKb} KB megamind`)}
       ${card('Needs owner', approvals.blocked, `${approvals.pending} pending`)}
+    </div>
+    <div class="grid" style="margin-top:14px">
+      <div class="card"><h3>Integrity &amp; limits</h3>${controls}</div>
+      <div class="card"><h3>Rate-limit budget</h3>${quotas||'<span class="muted">no caller is rate limited</span>'}</div>
     </div>
     <div class="grid" style="margin-top:14px">
       <div class="card"><h3>Callers &amp; trust</h3>${callers||'<span class="muted">none</span>'}</div>

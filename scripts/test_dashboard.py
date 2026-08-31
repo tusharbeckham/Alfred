@@ -124,6 +124,70 @@ class Collectors(unittest.TestCase):
             self.assertTrue(health["signatureValid"])
             self.assertGreater(health["capabilityCount"], 0)
 
+    def test_health_surfaces_the_audit_chain_state(self):
+        """A chain break that nobody sees is a chain that is not doing anything.
+
+        Before this, noticing a rewritten audit trail required remembering to run
+        `harness audit-verify` by hand.
+        """
+        health = dashboard.collect_health()
+        self.assertIn("auditChainOk", health)
+        self.assertIn("auditChained", health)
+        self.assertIn("auditLegacy", health,
+                      "pre-chain records must be reported, not silently counted as verified")
+        self.assertNotIn("integrityError", health, health.get("integrityError"))
+
+    def test_health_surfaces_the_egress_boundary(self):
+        """Which capabilities can reach the network, and which the least-trusted caller can
+        use to do it. The second number is the one that should stay small."""
+        health = dashboard.collect_health()
+        self.assertIn("egressIsolated", health)
+        self.assertGreater(len(health["egressIsolated"]), 0)
+        self.assertIn("untrustedNetworkReach", health)
+        self.assertLessEqual(len(health["untrustedNetworkReach"]), 2,
+                             "the untrusted caller's network reach should stay minimal")
+
+    def test_health_surfaces_signing_provenance(self):
+        """`sign --review` says what changed since the last signature. Only the ledger says
+        whether that signature was itself examined."""
+        health = dashboard.collect_health()
+        self.assertIn("signings", health)
+        self.assertIn("signingsReviewed", health)
+        self.assertIn("baselineWasReviewed", health)
+
+    def test_health_surfaces_whether_the_pre_chain_region_is_sealed(self):
+        """The 1237 pre-chain records were a true statement nobody could see: the chain did
+        not cover them, so they could be edited freely while audit-verify still said ok."""
+        health = dashboard.collect_health()
+        self.assertIn("legacySealed", health)
+        self.assertIn("legacyRecords", health)
+        if health["legacyRecords"]:
+            self.assertTrue(health["legacySealed"], "run 'harness seal-legacy'")
+            self.assertTrue(health["legacyIntact"], "the pre-chain region was altered")
+
+    def test_health_surfaces_whether_a_checkpoint_has_ever_been_taken(self):
+        """Tail truncation is undetectable without a witness, so "never checkpointed" is
+        itself the finding — hence the key is always present, even when null."""
+        self.assertIn("lastCheckpoint", dashboard.collect_health())
+
+    def test_health_surfaces_confinement_and_quota_budgets(self):
+        health = dashboard.collect_health()
+        self.assertTrue(health["confinementConfigured"],
+                        "resource confinement must be configured in the live policy")
+        self.assertIn("untrusted", health["confinementByTrust"])
+        self.assertNotIn("quotaError", [k for k, v in health.items() if v], health.get("quotaError"))
+        self.assertIn("local-model", health["quotas"])
+        self.assertGreater(health["quotas"]["local-model"]["perMinute"], 0)
+
+    def test_health_reports_revocations_as_counts_not_nonces(self):
+        """A nonce names a specific token. Knowing it grants nothing, but there is no
+        reason for a browser to receive one, so the surface is a count plus caller names."""
+        health = dashboard.collect_health()
+        self.assertIn("revokedTokens", health)
+        self.assertIsInstance(health["revokedTokens"], int)
+        self.assertIsInstance(health["revokedCallers"], list)
+        self.assertNotIn("nonces", health)
+
     def test_policy_resolves_caller_surfaces(self):
         policy = dashboard.collect_policy()
         self.assertNotIn("error", policy)

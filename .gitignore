@@ -76,6 +76,10 @@ deploy/cloudflare/.wrangler/
 secrets/harness.key
 secrets/harness-callers.json
 policy/harness-policy.sig
+# The sign-time snapshot that `harness diff` compares against. Local by design: it is
+# self-verifying against THIS clone's signature, and every clone generates its own key, so a
+# committed snapshot could never match one and would only ever be refused.
+policy/harness-policy.signed.json
 memory/harness-audit.jsonl
 backups/
 tmp/
