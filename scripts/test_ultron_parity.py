@@ -425,7 +425,7 @@ class GuardParity(unittest.TestCase):
             r"C:\p\CON",
             r"C:\p\nul.txt",
             r"C:\p\secrets.\key",
-            r"C:\PROGRA~1\x",
+            r"C:\NOSUCH~1\x",
         ]
         for raw in cases:
             with self.subTest(path=raw):
@@ -437,6 +437,30 @@ class GuardParity(unittest.TestCase):
                     "catch (e) { process.stdout.write('REFUSED'); }\n"
                 )
                 self.assertEqual(verdict, "REFUSED", f"Ultron must also refuse {raw}")
+
+    def test_both_engines_expand_a_resolvable_short_name_rather_than_refusing_it(self):
+        """A short name is only a problem if it SURVIVES resolution.
+
+        Refusing `~N` up front rejected legitimate paths whose ancestor happens to be
+        shortened — `C:\\Users\\RUNNER~1\\...` on a CI runner, or any username long enough for
+        Windows to abbreviate. Alfred's CI caught that. Expanding first is also *stronger*:
+        confinement then judges the real location instead of the abbreviation, so
+        `C:\\PROGRA~1` is refused for being outside the workspace rather than for its spelling.
+        """
+        resolved = guards.safe_resolve(r"C:\PROGRA~1\does-not-exist-yet.txt", ROOT)
+        self.assertIn("Program Files", str(resolved))
+        self.assertFalse(guards.inside_roots(resolved, [str(ROOT)]))
+
+        theirs = node_eval(
+            "import { safeResolve, insideRoots } from './src/guards.mjs';\n"
+            "const r = safeResolve('C:\\\\PROGRA~1\\\\does-not-exist-yet.txt');\n"
+            f"process.stdout.write(JSON.stringify({{ resolved: r, inside: insideRoots(r, [{json.dumps(str(ROOT))}]) }}));\n"
+        )
+        payload = json.loads(theirs)
+        self.assertIn("Program Files", payload["resolved"])
+        self.assertFalse(payload["inside"])
+        self.assertEqual(str(resolved).lower(), payload["resolved"].lower(),
+                         "both engines must expand it to the same real path")
 
     def test_both_engines_agree_a_legitimate_path_is_allowed(self):
         """A guard that refuses everything is not parity, it is breakage."""

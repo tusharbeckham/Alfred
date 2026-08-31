@@ -86,6 +86,39 @@ class WindowsPathConfinement(unittest.TestCase):
             guards.safe_resolve(r"C:\NOSUCH~1\file.txt", ROOT)
         self.assertIn("short name", str(ctx.exception))
 
+    @unittest.skipUnless(WINDOWS, "8.3 short names are a Windows/NTFS feature")
+    def test_an_existing_short_named_ancestor_does_not_refuse_a_new_file(self):
+        """Regression, found by CI and invisible on my machine.
+
+        ``GetLongPathNameW`` only expands a path that EXISTS. So a capability writing a file
+        that is not there yet, under a directory whose own name Windows has shortened, failed
+        expansion and was then refused for containing ``~N`` — even though the only short
+        component was a legitimate part of the user's home path. GitHub's Windows runners hit
+        it (``C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\...``) and so would any user whose
+        username is long enough to be shortened.
+
+        ``C:\\PROGRA~1`` is a real alias on every Windows install, so this reproduces the shape
+        deterministically: existing short-named ancestor, non-existent tail.
+        """
+        expanded = guards._expand_short_name(r"C:\PROGRA~1\does-not-exist-yet.txt")
+        self.assertNotIn("~", expanded, "the existing ancestor must be expanded")
+        self.assertTrue(expanded.endswith("does-not-exist-yet.txt"), expanded)
+
+        # It now resolves rather than being refused for the wrong reason — and resolving is
+        # what lets confinement judge the REAL location instead of the abbreviation.
+        resolved = guards.safe_resolve(r"C:\PROGRA~1\does-not-exist-yet.txt", ROOT)
+        self.assertIn("Program Files", str(resolved))
+        self.assertFalse(guards.inside_roots(resolved, [str(ROOT)]),
+                         "and confinement still refuses it, for the right reason")
+
+    def test_a_new_file_under_a_normal_ancestor_resolves(self):
+        """The everyday write case: the target does not exist yet and that is fine."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            target = guards.safe_resolve(str(base / "sub" / "new.txt"), base)
+            self.assertTrue(str(target).endswith("new.txt"))
+            self.assertTrue(guards.inside_roots(target, [str(base)]))
+
     def test_nul_byte_is_refused(self):
         with self.assertRaises(guards.GuardError):
             guards.safe_resolve("C:/Alfred/ok\x00/../../evil", ROOT)

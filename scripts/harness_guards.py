@@ -74,22 +74,50 @@ def _component_is_device(component: str) -> bool:
 def _expand_short_name(path: str) -> str:
     """Expand an 8.3 short path to its long form via GetLongPathNameW.
 
-    Only meaningful on Windows and only for paths that exist; a non-existent path
-    has no long form, which is fine because the short-name *check* below refuses
-    unresolved ``~N`` components anyway.
+    ``GetLongPathNameW`` only resolves a path that **exists**. That matters more than it
+    sounds: a capability writing a file that is not there yet, under a profile directory
+    whose own name is shortened, would fail expansion and then be refused for containing
+    ``~N`` — even though the only short component is a legitimate part of the user's home
+    path. GitHub's Windows runners hit exactly this (``C:\\Users\\RUNNER~1\\...``), and so
+    would any user whose username is long enough for Windows to shorten it.
+
+    So the deepest **existing** ancestor is expanded and the not-yet-existing tail is
+    rejoined. Only a short name that survives that is genuinely unresolvable, which is the
+    case worth refusing. Ultron's ``safeResolve`` already walked ancestors for the same
+    reason; this brings the two back in line.
     """
     if not WINDOWS:
         return path
-    try:
-        import ctypes
 
-        buf = ctypes.create_unicode_buffer(32768)
-        length = ctypes.windll.kernel32.GetLongPathNameW(str(path), buf, 32768)  # type: ignore[attr-defined]
-        if 0 < length < 32768 and buf.value:
-            return buf.value
-    except Exception:  # noqa: BLE001 - if the API is unavailable we fall through to the check below
-        pass
-    return path
+    def _long(candidate: str) -> str | None:
+        try:
+            import ctypes
+
+            buf = ctypes.create_unicode_buffer(32768)
+            length = ctypes.windll.kernel32.GetLongPathNameW(candidate, buf, 32768)  # type: ignore[attr-defined]
+            if 0 < length < 32768 and buf.value:
+                return buf.value
+        except Exception:  # noqa: BLE001 - API unavailable; fall through to the check below
+            pass
+        return None
+
+    resolved = _long(str(path))
+    if resolved:
+        return resolved
+
+    # The path does not exist. Expand the deepest ancestor that does, and keep the rest.
+    current = Path(str(path))
+    trailing: list[str] = []
+    for _ in range(64):          # bounded: a path cannot be deeper than this in practice
+        parent = current.parent
+        if parent == current:
+            break
+        trailing.insert(0, current.name)
+        current = parent
+        expanded = _long(str(current))
+        if expanded:
+            return str(Path(expanded, *trailing))
+    return str(path)
 
 
 def safe_resolve(raw: str, base: Path) -> Path:
