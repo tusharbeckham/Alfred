@@ -327,6 +327,14 @@ def attack_quota() -> None:
                 break
         asserted("quota", "the bucket can be emptied", drained > 0, f"{drained} tokens consumed")
 
+        # Pin the bucket to empty AS OF NOW before invoking the CLI. `Quota` freezes its clock
+        # at construction, so the timestamp the drain loop wrote is older than reality by
+        # however long the loop took - and the CLI then computes a refill against that stale
+        # timestamp and lets one call through. That made this probe pass or fail depending on
+        # how slow the machine was, and a red team that flakes is a red team that gets ignored.
+        state.write_text(json.dumps({"local-model": {"tokens": 0.0, "ts": time.time()}}),
+                         encoding="utf-8")
+
         refused("quota", "run a capability with an empty bucket",
                 cli(["run", "disk-report", "--caller", "local-model", "--token", token]),
                 needle="rate limit")
