@@ -231,7 +231,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"# backend  : {args.backend}\n# model    : {args.model}")
         print(f"# endpoint : {args.endpoint}")
         print(f"# kiro-model (for reference): {agent['model']}")
-        if args.backend in ("claude", "api"):
+        if args.backend in ("claude", "api", "bai"):
             resolved, effort = B.resolve_agent_model(
                 agent["model"], args.backend, B.load_model_overrides())
             print(f"# resolved : {resolved} (effort {effort})")
@@ -241,7 +241,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(messages[1]["content"] or "(empty)")
         return 0
 
-    if args.backend in ("claude", "api"):
+    if args.backend in ("claude", "api", "bai"):
         # Both go through the shared executors, so Ultron and the DAG engine
         # produce byte-identical prompts and identical model routing.
         try:
@@ -277,6 +277,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
     agent = load_agent(args.agent)
 
+    if args.backend == "bai":
+        return _chat_bai(agent, args)
     if args.backend == "api":
         return _chat_api(agent, args)
 
@@ -365,9 +367,45 @@ def _chat_api(agent: dict, args: argparse.Namespace) -> int:
 
 
 # ------------------------------------------------------------------------------ cli
+def _chat_bai(agent: dict, args: argparse.Namespace) -> int:
+    """Multi-turn chat against the B.AI API (free cloud models)."""
+    default_model = os.environ.get("BAI_MODEL", "qwen3.8-flash")
+    model = args.model_override or default_model
+    system = assemble_system_prompt(agent, steering=not args.no_steering,
+                                    skills=args.skills, memory_text="")
+    transcript: "list[str]" = []
+    print(f"Ultron - chatting with {agent['name']} on {model} (B.AI API, free). "
+          "Type /exit to quit, /reset to clear history.\n")
+    while True:
+        try:
+            user = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not user:
+            continue
+        if user in ("/exit", "/quit"):
+            break
+        if user == "/reset":
+            transcript.clear()
+            print("(history cleared)\n")
+            continue
+        convo = "\n\n".join(transcript + [f"User: {user}"])
+        try:
+            text, meta = B.call_bai(model, system, convo,
+                                    max_tokens=args.max_tokens,
+                                    timeout=args.timeout)
+        except B.BackendError as exc:
+            print(f"\nultron: {exc}\n", file=sys.stderr)
+            continue
+        print(f"\n{agent['name']}> {text}\n")
+        transcript += [f"User: {user}", f"Assistant: {text}"]
+    return 0
+
+
 def add_model_flags(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--agent", "-a", required=True, help="agent name (see 'ultron agents')")
-    sp.add_argument("--backend", choices=["local", "claude", "api", "kiro"],
+    sp.add_argument("--backend", choices=["local", "bai", "claude", "api", "kiro"],
                     default="local",
                     help="local = LM Studio (free, default); claude = Claude Code CLI "
                          "(tools); api = Anthropic API (portable); kiro = kiro-cli")

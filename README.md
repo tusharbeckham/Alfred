@@ -163,7 +163,11 @@ That is deliberate: the engine is a graph with explicit gates, not a retry loop,
 
 Every row is a real control inside `run_capability` — caller resolution, token auth, deny-by-default, the per-caller allowlist, the gate, parameter validation, argv construction, execution, audit. Nothing is drawn for decoration.
 
-**Interactive editing** comes from `scripts/lineedit.py`, built on `msvcrt` because Python ships no `readline` on Windows and `pyreadline3` would be a dependency: tab completion (context-aware — `run <TAB>` offers specs, `do <TAB>` offers capabilities), up/down history persisted across sessions, `Ctrl+U/A/E`, and `Ctrl+C` cancels the line instead of killing the session. It falls back to `input()` whenever stdin or stdout is not a console, so piping still works.
+**Interactive editing** comes from `scripts/lineedit.py`, built on `msvcrt` because Python ships no `readline` on Windows and `pyreadline3` would be a dependency: tab completion (context-aware — `run <TAB>` offers specs, `do <TAB>` offers capabilities), up/down history persisted across sessions, `Ctrl+U/A/E`, and `Ctrl+C` cancels the line instead of killing the session. It features **smart paste detection** (bracketed paste and time-based heuristics) to handle large multi-line code pastes without breaking the terminal, and it falls back to `input()` whenever stdin or stdout is not a console, so piping still works.
+
+**Implicit routing**: Unrecognised commands or natural language pasted into the console are **implicitly routed** to the `ask` command. You can paste a code snippet or ask a question directly without prefixing it, and Alfred will hand it to the active model.
+
+**Reasoning models & environment configuration**: The console loads `.env` globally on startup. You can switch to reasoning models like `glm-5.3-flash` (via B.AI) simply by setting `BAI_MODEL=glm-5.3-flash` in your `.env`. The backend natively supports reasoning models, capturing their inner chain-of-thought and displaying it in `<think>` blocks instead of silently failing when the token limit is reached.
 
 Encoding is handled explicitly: every glyph has an ASCII fallback chosen from the real stdout encoding, because a cp1252 console raises `UnicodeEncodeError` on box-drawing characters. `NO_COLOR` is honoured, and animation degrades to one streamed line per event when stdout is not a TTY (so logs and CI stay readable).
 

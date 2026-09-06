@@ -42,6 +42,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+# Load .env into os.environ so settings like BAI_MODEL take effect globally
+dot_env = ROOT / ".env"
+if dot_env.exists():
+    try:
+        for line in dot_env.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                k = k.strip()
+                v = v.strip()
+                if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                    v = v[1:-1]
+                if k not in os.environ:
+                    os.environ[k] = v
+    except OSError:
+        pass
+
 LMSTUDIO = os.environ.get("ALFRED_LMSTUDIO", "http://localhost:1234")
 
 
@@ -590,11 +607,18 @@ def cmd_ask(args: str) -> None:
         out(f"  {C.dim}usage: ask <prompt>{C.reset}\n")
         return
     lm = probe_lmstudio()
+    use_bai = False
     if not lm["up"]:
-        out(f"  {C.red}lm studio is not reachable{C.reset} "
-            f"{C.dim}start it: lms server start && lms load alfred-coder-7b -y{C.reset}\n")
-        return
-    model = next((m for m in lm["models"] if "embed" not in m), lm["models"][0])
+        import backends
+        if backends.have_bai_key():
+            use_bai = True
+            model = os.environ.get("BAI_MODEL", "qwen3.8-flash")
+        else:
+            out(f"  {C.red}lm studio is not reachable{C.reset} "
+                f"{C.dim}start it: lms server start && lms load alfred-coder-7b -y{C.reset}\n")
+            return
+    else:
+        model = next((m for m in lm["models"] if "embed" not in m), lm["models"][0])
 
     context = ""
     try:
@@ -614,22 +638,34 @@ def cmd_ask(args: str) -> None:
     if context:
         system += f"\n\nRelevant memory (may be incomplete):\n{context}"
 
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "system", "content": system},
-                     {"role": "user", "content": prompt}],
-        "temperature": 0.3, "max_tokens": 600,
-    }).encode("utf-8")
-    request = urllib.request.Request(
-        f"{LMSTUDIO}/v1/chat/completions", data=payload,
-        headers={"Content-Type": "application/json"}, method="POST")
+    if use_bai:
+        import backends
+        with Spinner(f"{model} thinking (B.AI)"):
+            try:
+                text, meta = backends.call_bai(model, system, prompt)
+                body = {
+                    "choices": [{"message": {"content": text}}],
+                    "usage": meta.get("usage", {})
+                }
+            except Exception as exc:
+                body = {"error": str(exc)}
+    else:
+        payload = json.dumps({
+            "model": model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": prompt}],
+            "temperature": 0.3, "max_tokens": 600,
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            f"{LMSTUDIO}/v1/chat/completions", data=payload,
+            headers={"Content-Type": "application/json"}, method="POST")
 
-    with Spinner(f"{model} thinking"):
-        try:
-            with urllib.request.urlopen(request, timeout=180) as response:
-                body = json.loads(response.read())
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            body = {"error": str(exc)}
+        with Spinner(f"{model} thinking"):
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    body = json.loads(response.read())
+            except (urllib.error.URLError, OSError, ValueError) as exc:
+                body = {"error": str(exc)}
 
     if "error" in body:
         out(f"  {C.red}failed{C.reset} {C.dim}{body['error']}{C.reset}\n")
@@ -1447,8 +1483,8 @@ def repl() -> int:
             continue
         handler = COMMANDS.get(key)
         if not handler:
-            out(f"  {C.dim}unknown command {C.reset}{C.bold}{name}{C.reset}"
-                f"{C.dim}{_did_you_mean(key)}{C.reset}\n")
+            out(f"  {C.dim}implicit ask: {C.reset}{C.bold}{name}{C.reset}\n")
+            cmd_ask(raw)
             continue
         try:
             handler(args)

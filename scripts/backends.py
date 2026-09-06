@@ -56,6 +56,7 @@ __all__ = [
     "claude_workspace_trusted", "claude_trust_hint",
     "BACKENDS", "default_probes", "resolve_backend", "backend_report",
     "make_executor", "echo_executor", "kiro_executor",
+    "have_bai_key", "call_bai", "bai_key",
 ]
 
 
@@ -579,9 +580,108 @@ def _read_error(e: urllib.error.HTTPError) -> str:
         return e.reason if isinstance(e.reason, str) else str(e)
 
 
+
+# ---------------------------------------------------------------------- B.AI API
+def bai_key() -> str:
+    k = (os.environ.get("BAI_API_KEY") or "").strip()
+    if k:
+        return k
+    sec = ROOT / "secrets" / "models.json"
+    if sec.exists():
+        try:
+            data = json.loads(sec.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("BAI_API_KEY"):
+                return str(data["BAI_API_KEY"]).strip()
+        except Exception:
+            pass
+    dot_env = ROOT / ".env"
+    if dot_env.exists():
+        try:
+            for line in dot_env.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("BAI_API_KEY="):
+                    val = line.partition("=")[2].strip()
+                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                        val = val[1:-1]
+                    return val
+        except Exception:
+            pass
+    return ""
+
+
+def have_bai_key() -> bool:
+    return bool(bai_key())
+
+
+def call_bai(model: str, system: str, task: str, *,
+             max_tokens: int = 4096, temperature: float = 0.2,
+             timeout: "float | None" = 120, retries: int = 2,
+             sleeper=time.sleep, opener=None) -> "tuple[str, dict]":
+    key = bai_key()
+    if not key:
+        raise BackendError("BAI_API_KEY is not set; cannot use the 'bai' backend.")
+    base_url = (os.environ.get("BAI_BASE_URL") or "https://api.b.ai/v1").rstrip("/")
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": task})
+
+    body = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {key}",
+    }
+    url = f"{base_url}/chat/completions"
+    send = opener or _urlopen_json
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            data = send(url, headers, body, timeout)
+            break
+        except urllib.error.HTTPError as e:
+            status = e.code
+            detail = _read_error(e)
+            retryable = status == 429 or status >= 500
+            if retryable and attempt <= retries + 1:
+                delay = min(2.0 ** (attempt - 1), 10.0)
+                sleeper(delay)
+                continue
+            raise BackendError(f"B.AI API {status}: {detail}")
+        except urllib.error.URLError as e:
+            if attempt <= retries + 1:
+                sleeper(min(2.0 ** (attempt - 1), 10.0))
+                continue
+            raise BackendError(f"B.AI API unreachable: {e}")
+
+    try:
+        msg = data["choices"][0]["message"]
+        text = msg.get("content") or ""
+        reasoning = msg.get("reasoning_content") or ""
+        if reasoning:
+            text = f"<think>\n{reasoning.strip()}\n</think>\n\n{text}"
+    except (KeyError, IndexError):
+        raise BackendError(f"unexpected response from B.AI: {data}")
+
+    usage = data.get("usage", {})
+    meta = {
+        "backend": "bai",
+        "model": model,
+        "usage": usage,
+        "cost_usd": 0.0,
+    }
+    return text, meta
+
+
 # ---------------------------------------------------------------- backend probing
-BACKENDS = ("claude", "api", "local", "kiro", "dry")
-_AUTO_ORDER = ("claude", "api", "local", "kiro")
+BACKENDS = ("claude", "api", "bai", "local", "kiro", "dry")
+_AUTO_ORDER = ("claude", "api", "bai", "local", "kiro")
 
 
 def have_claude_cli() -> bool:
@@ -640,6 +740,7 @@ def default_probes() -> dict:
     return {
         "claude": have_claude_cli(),
         "api": have_api_key(),
+        "bai": have_bai_key(),
         "local": local_endpoint_up(),
         "kiro": have_kiro_cli(),
         "dry": True,
@@ -678,6 +779,7 @@ def _unavailable_hint(name: str) -> str:
         return "backend 'claude': " + claude_trust_hint()
     return {
         "api": "backend 'api' needs ANTHROPIC_API_KEY in the environment.",
+        "bai": "backend 'bai' needs BAI_API_KEY in the environment, .env, or secrets/models.json.",
         "local": f"backend 'local' needs LM Studio reachable at {DEFAULT_LOCAL_ENDPOINT}.",
         "kiro": "backend 'kiro' needs kiro-cli on PATH.",
         "dry": "backend 'dry' is always available (this should not happen).",
@@ -692,6 +794,7 @@ def backend_report(probes: "dict | None" = None) -> str:
     detail = {
         "claude": "claude -p (tools, subscription)",
         "api": "api.anthropic.com/v1/messages (text-only, portable)",
+        "bai": "api.b.ai/v1 (free cloud models, OpenAI-compatible)",
         "local": f"LM Studio {DEFAULT_LOCAL_ENDPOINT} (free, offline)",
         "kiro": "kiro-cli chat --no-interactive",
         "dry": "echo only; never spawns a model",
@@ -842,6 +945,15 @@ def _api_call(agent: str, task: str, timeout, *, overrides: dict, max_tokens: in
         timeout=timeout, fallbacks=fallbacks)
 
 
+def _bai_call(agent: str, task: str, timeout, *, overrides: dict, max_tokens: int,
+              model_override: "str | None", skills: bool):
+    cfg = load_agent(agent, strict=False)
+    default_model = os.environ.get("BAI_MODEL", "qwen3.8-flash")
+    model = model_override or default_model
+    system = assemble_system_prompt(cfg, steering=True, skills=skills, memory_text="")
+    return call_bai(model, system, task, max_tokens=max_tokens, timeout=timeout)
+
+
 def _local_call(agent: str, task: str, timeout, *, endpoint: str, model: str,
                 max_tokens: int, temperature: float, skills: bool):
     cfg = load_agent(agent, strict=False)
@@ -900,6 +1012,12 @@ def make_executor(backend: str = "auto", *, probes: "dict | None" = None,
                 effort_override=effort, model_override=model,
                 fallbacks=bool(fallbacks), skills=skills),
             "api")
+    if chosen == "bai":
+        return Executor(
+            lambda a, t, to: _bai_call(
+                a, t, to, overrides=overrides, max_tokens=max_tokens,
+                model_override=model, skills=skills),
+            "bai")
     if chosen == "local":
         return Executor(
             lambda a, t, to: _local_call(

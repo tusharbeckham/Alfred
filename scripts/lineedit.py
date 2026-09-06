@@ -119,9 +119,25 @@ class LineEditor:
 
     # -- painting ---------------------------------------------------------
     def _redraw(self, prompt: str, buffer: str, position: int) -> None:
+        import shutil
+        columns = shutil.get_terminal_size((80, 20)).columns
+        
+        display_buf = buffer.replace("\n", " \u23CE ")
+        display_pos = len(buffer[:position].replace("\n", " \u23CE "))
+        
+        max_buf_len = columns - len(prompt) - 1
+        if max_buf_len > 10 and len(display_buf) > max_buf_len:
+            if display_pos > max_buf_len - 10:
+                start_idx = display_pos - (max_buf_len - 10)
+                display_buf = "..." + display_buf[start_idx + 3:]
+                display_buf = display_buf[:max_buf_len]
+                display_pos = display_pos - start_idx
+            else:
+                display_buf = display_buf[:max_buf_len - 3] + "..."
+                
         # \r to column 0, \x1b[K to clear the rest, then reposition the cursor.
-        self.stream.write(f"\r\x1b[K{prompt}{buffer}")
-        trailing = len(buffer) - position
+        self.stream.write(f"\r\x1b[K{prompt}{display_buf}")
+        trailing = len(display_buf) - display_pos
         if trailing > 0:
             self.stream.write(f"\x1b[{trailing}D")
         self.stream.flush()
@@ -165,24 +181,80 @@ class LineEditor:
             return line
 
         buffer, position = "", 0
+        self.stream.write("\x1b[?2004h")  # enable bracketed paste
         self.stream.write(prompt)
         self.stream.flush()
-
+        
+        in_paste = False
+        
+        def _cleanup():
+            self.stream.write("\x1b[?2004l")  # disable bracketed paste
+            
         while True:
             char = msvcrt.getwch()
+            
+            if char == "\x1b":
+                if msvcrt.kbhit():
+                    c2 = msvcrt.getwch()
+                    if c2 == "[":
+                        c3 = msvcrt.getwch()
+                        if c3 == "2":
+                            c4 = msvcrt.getwch()
+                            c5 = msvcrt.getwch()
+                            c6 = msvcrt.getwch()
+                            if c4 == "0" and c5 == "0" and c6 == "~":
+                                in_paste = True
+                                continue
+                            elif c4 == "0" and c5 == "1" and c6 == "~":
+                                in_paste = False
+                                continue
+                            msvcrt.ungetwch(c6)
+                            msvcrt.ungetwch(c5)
+                            msvcrt.ungetwch(c4)
+                        msvcrt.ungetwch(c3)
+                    msvcrt.ungetwch(c2)
 
             if char in ("\r", "\n"):
+                if in_paste:
+                    if char == "\r": continue
+                    buffer = buffer[:position] + "\n" + buffer[position:]
+                    position += 1
+                    self._redraw(prompt, buffer, position)
+                    continue
+                
+                # Fallback paste detection: if another character arrives within 15ms
+                # of a newline, it's a paste (or typing impossibly fast).
+                import time
+                time.sleep(0.005)
+                
+                # Consume CRLF as a single newline if present
+                if char == "\r" and msvcrt.kbhit():
+                    next_char = msvcrt.getwch()
+                    if next_char != "\n":
+                        msvcrt.ungetwch(next_char)
+                
+                time.sleep(0.015)
+                if msvcrt.kbhit():
+                    # Characters are still streaming in - this is a paste!
+                    buffer = buffer[:position] + "\n" + buffer[position:]
+                    position += 1
+                    self._redraw(prompt, buffer, position)
+                    continue
+
                 self.stream.write("\n")
                 self.stream.flush()
                 self.history.add(buffer)
+                _cleanup()
                 return buffer
 
             if char == "\x03":                      # Ctrl+C
                 self.stream.write("\n")
+                _cleanup()
                 raise KeyboardInterrupt
             if char == "\x04":                      # Ctrl+D
                 if not buffer:
                     self.stream.write("\n")
+                    _cleanup()
                     raise EOFError
                 continue
             if char == "\x15":                      # Ctrl+U - clear the line

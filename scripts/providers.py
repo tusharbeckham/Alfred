@@ -116,6 +116,14 @@ PROVIDERS: dict[str, Provider] = {
         notes="FreeBuff gateway (local proxy to free upstreams). Free, but rate-limited "
               "and third-party - do not send secrets or private code through it.",
     ),
+    "bai": Provider(
+        name="bai",
+        base_url=os.environ.get("BAI_BASE_URL", "https://api.b.ai/v1"),
+        default_model=os.environ.get("BAI_MODEL", "qwen3.8-flash"),
+        env_key="BAI_API_KEY",
+        tier="cheap",
+        notes="B.AI unified OpenAI-compatible gateway with free models.",
+    ),
     "openrouter": Provider(
         name="openrouter",
         base_url="https://openrouter.ai/api/v1",
@@ -141,13 +149,28 @@ def _load_secrets() -> dict[str, str]:
 
 
 def get_key(provider: Provider) -> str | None:
-    """Environment first, then secrets/models.json. Never logged."""
+    """Environment first, then secrets/models.json, then .env. Never logged."""
     if not provider.env_key:
         return None
     from_env = os.environ.get(provider.env_key)
     if from_env:
         return from_env.strip()
-    return _load_secrets().get(provider.env_key, "").strip() or None
+    from_sec = _load_secrets().get(provider.env_key, "").strip()
+    if from_sec:
+        return from_sec
+    dot_env = ROOT / ".env"
+    if dot_env.exists():
+        try:
+            for line in dot_env.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith(f"{provider.env_key}="):
+                    val = line.partition("=")[2].strip()
+                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                        val = val[1:-1]
+                    return val
+        except Exception:
+            pass
+    return None
 
 
 def fingerprint(key: str | None) -> str:
