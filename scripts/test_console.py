@@ -460,7 +460,15 @@ class RawKeyEditing(unittest.TestCase):
         stream = io.StringIO()
         stream.isatty = lambda: True  # type: ignore[method-assign]
         fake = mock.Mock()
-        fake.getwch.side_effect = queue
+
+        def _getwch():
+            if queue:
+                return queue.pop(0)
+            raise StopIteration
+
+        fake.getwch.side_effect = _getwch
+        fake.kbhit.side_effect = lambda: bool(queue)
+        fake.ungetwch.side_effect = lambda c: queue.insert(0, c)
 
         editor = lineedit.LineEditor(history=history, completer=completer, stream=stream)
         with mock.patch.object(lineedit, "msvcrt", fake), \
